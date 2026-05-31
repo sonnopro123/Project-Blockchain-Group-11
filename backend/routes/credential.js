@@ -15,12 +15,11 @@ const blockchain = require('../blockchain/blockchainService');
 // POST /credential/issue
 router.post('/issue', async (req, res) => {
   try {
-    const { issuerAddress, eccPrivateKey, studentId, studentName, courses } = req.body;
+    const { issuerAddress, studentId, studentName, courses } = req.body;
 
-    if (!issuerAddress || !eccPrivateKey || !studentId || !courses || courses.length === 0) {
+    if (!issuerAddress || !studentId || !courses || courses.length === 0) {
       return res.status(400).json({
-        error: 'issuerAddress, eccPrivateKey, studentId, courses required',
-        hint: 'eccPrivateKey is the ECC key returned at /issuer/register (not the Ethereum key)',
+        error: 'issuerAddress, studentId, courses required',
       });
     }
 
@@ -28,6 +27,12 @@ router.post('/issue', async (req, res) => {
     const issuerRecord = getIssuer(issuerAddress);
     if (!issuerRecord) {
       return res.status(404).json({ error: 'Issuer not found. Register issuer first.' });
+    }
+
+    // Retrieve ECC private key from DB — clients no longer need to send it
+    const eccPrivateKey = issuerRecord.eccPrivateKey;
+    if (!eccPrivateKey) {
+      return res.status(500).json({ error: 'Issuer ECC key not found in storage. Re-register issuer.' });
     }
 
     // Block if student already has an active (non-revoked) credential from this issuer

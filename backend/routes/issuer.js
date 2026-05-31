@@ -41,10 +41,11 @@ router.post('/register', async (req, res) => {
     // 2. Register issuer on-chain (owner wallet pays gas, registerIssuer is onlyOwner)
     await blockchain.registerIssuerOnChain(ethAddress);
 
-    // 3. Store off-chain
+    // 3. Store off-chain (including ECC private key so backend can sign without client re-sending it)
     saveIssuer(ethAddress, {
       name,
       publicKey: eccPublicKey,
+      eccPrivateKey,
       ethAddress,
       ethPrivateKey,
     });

@@ -1,7 +1,7 @@
 # Tiến độ dự án — CredProof
 ### Decentralized Academic Credential Verification
 
-Cập nhật lần cuối: 2026-05-11
+Cập nhật lần cuối: 2026-05-31
 
 ---
 
@@ -14,12 +14,13 @@ Cập nhật lần cuối: 2026-05-11
 | Merkle Engine | ✅ Hoàn thành | Unit test pass |
 | Backend API | ✅ Hoàn thành | Chạy port 3000 |
 | Blockchain Service | ✅ Hoàn thành | Kết nối Hardhat local |
-| End-to-End Test | ⚠️ Chưa chạy lại | Script sẵn sàng: test/e2e.test.js |
+| End-to-End Test | ✅ Script đã fix | Sẵn sàng chạy: node test/e2e.test.js |
 | Frontend Sprint 1 | ✅ Hoàn thành | Landing + IssuerDashboard |
 | Frontend Sprint 2 | ✅ Hoàn thành | StudentDashboard + VerifierDashboard |
 | Frontend UX | ✅ Hoàn thành | Toast, Tooltip, WorkflowStepper, Context |
 | Branding | ✅ Hoàn thành | CredProof — Decentralized Academic Credential Verification |
 | Bug Fix: Re-issue | ✅ Hoàn thành | Credential revoked → cho phép issue lại |
+| Bug Fix: CORS + eccPrivateKey | ✅ Hoàn thành | 2026-05-31 — xem LỊCH SỬ |
 
 ---
 
@@ -85,6 +86,16 @@ Test: `test/eccMerkle.test.js` — all pass
 - Duplicate check chỉ block credential ACTIVE, bỏ qua revoked
 - Thêm `getActiveCredentialForStudent()` vào `backend/storage/db.js`
 
+**Fix quan trọng (2026-05-31):**
+- CORS middleware (cors package) thêm vào `backend/server.js`, origin = `FRONTEND_URL` env
+- `backend/storage/db.js`: `saveIssuer` nay lưu thêm `eccPrivateKey`
+- `backend/routes/credential.js`: `/credential/issue` không còn yêu cầu client gửi `eccPrivateKey` — backend tự lấy từ DB
+- `frontend/src/pages/IssuerDashboard.jsx`: bỏ input `eccPrivateKey` khỏi tab Phát hành
+- `scripts/deploy.js`: tự động ghi `CONTRACT_ADDRESS` vào `.env` sau khi deploy
+- `frontend/.env.example`: đổi `VITE_API_BASE_URL` thành `/api` (dùng Vite proxy, tránh CORS)
+- `.env.example` (root): xóa CONTRACT_ADDRESS cũ, thêm `FRONTEND_URL`, thêm comment hướng dẫn
+- `test/e2e.test.js`: bỏ `eccPrivateKey` khỏi step 2, e2e có thể re-run mà không cần clear data.json
+
 ---
 
 ### MODULE E — Blockchain Service
@@ -145,12 +156,11 @@ Stack: React 18 + Vite 5 + TailwindCSS + Axios + Framer Motion
 ## VIỆC CÒN LẠI
 
 ### Ưu tiên cao
-- [ ] Chạy lại `node test/e2e.test.js` để verify toàn bộ flow sau bug fix
-- [ ] Test thủ công demo flow 9 bước (xem readme.md)
+- [ ] Khởi động 3 service (hardhat node + deploy + backend) rồi chạy `node test/e2e.test.js`
+- [ ] Test thủ công demo flow 9 bước trên frontend tại localhost:5173
 
 ### Ưu tiên trung bình
 - [ ] Test StudentDashboard + VerifierDashboard kết nối backend thực tế
-- [ ] Kiểm tra proxy Vite → backend hoạt động đúng trên máy mới
 
 ### Ưu tiên thấp (demo cuối)
 - [ ] Deploy contract lên Sepolia testnet
@@ -174,3 +184,4 @@ Stack: React 18 + Vite 5 + TailwindCSS + Axios + Framer Motion
 | 2026-05-10 | Rebrand toàn bộ frontend: ChứngChỉ Chain → CredProof |
 | 2026-05-11 | Cập nhật readme.md (business logic rules, UX rules, security rules, demo flow 9 bước) |
 | 2026-05-11 | Remove claude.md khỏi git tracking; cập nhật .gitignore |
+| 2026-05-31 | Fix CORS, eccPrivateKey storage, deploy script auto-write, frontend cleanup, e2e test update |

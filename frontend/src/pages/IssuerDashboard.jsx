@@ -200,8 +200,7 @@ function IssueTab({ onIssued, onGoToRevoke }) {
   const toast = useToast()
 
   const [form, setForm] = useState({
-    issuerAddress: issuer?.ethAddress    || '',
-    eccPrivateKey: issuer?.eccPrivateKey || '',
+    issuerAddress: issuer?.ethAddress || '',
     studentId:     '',
     studentName:   '',
   })
@@ -233,7 +232,6 @@ function IssueTab({ onIssued, onGoToRevoke }) {
     const filled = courses.filter(c => c.courseCode && c.grade)
     const errs = validate({
       issuerAddress: [{ test: !!form.issuerAddress.trim(), msg: 'Thiếu địa chỉ issuer' }],
-      eccPrivateKey: [{ test: !!form.eccPrivateKey.trim(), msg: 'Thiếu ECC private key' }],
       studentId:     [{ test: !!form.studentId.trim(),     msg: 'Nhập mã sinh viên' }],
       courses:       [{ test: filled.length > 0,           msg: 'Cần ít nhất 1 môn học có mã và điểm' }],
     })
@@ -266,36 +264,19 @@ function IssueTab({ onIssued, onGoToRevoke }) {
           {isLocked && <Badge variant="green">Tự động điền từ đăng ký</Badge>}
         </div>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <label className="text-sm font-medium text-[#888]">Địa chỉ tổ chức (Issuer)</label>
-                {isLocked && <Tooltip text="Tự động điền từ bước đăng ký tổ chức" />}
-              </div>
-              <Input
-                placeholder="0x70997970..."
-                value={form.issuerAddress}
-                error={errors.issuerAddress}
-                readOnly={isLocked}
-                className={isLocked ? 'opacity-60 cursor-not-allowed' : ''}
-                onChange={(e) => !isLocked && setForm({ ...form, issuerAddress: e.target.value })}
-              />
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <label className="text-sm font-medium text-[#888]">Địa chỉ tổ chức (Issuer)</label>
+              {isLocked && <Tooltip text="Tự động điền từ bước đăng ký tổ chức" />}
             </div>
-            <div>
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <label className="text-sm font-medium text-[#888]">ECC Private Key của tổ chức</label>
-                <Tooltip text={isLocked ? "Tự động điền từ bước đăng ký (đây là ECC key, khác với Ethereum key)" : "Key ECC được sinh tự động khi đăng ký tổ chức. Khác với Ethereum private key."} />
-              </div>
-              <Input
-                placeholder="b65d3b62..."
-                type="password"
-                value={form.eccPrivateKey}
-                error={errors.eccPrivateKey}
-                readOnly={isLocked}
-                className={isLocked ? 'opacity-60 cursor-not-allowed' : ''}
-                onChange={(e) => !isLocked && setForm({ ...form, eccPrivateKey: e.target.value })}
-              />
-            </div>
+            <Input
+              placeholder="0x70997970..."
+              value={form.issuerAddress}
+              error={errors.issuerAddress}
+              readOnly={isLocked}
+              className={isLocked ? 'opacity-60 cursor-not-allowed' : ''}
+              onChange={(e) => !isLocked && setForm({ ...form, issuerAddress: e.target.value })}
+            />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Input

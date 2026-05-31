@@ -33,7 +33,6 @@ const BASE_URL = 'http://localhost:3000';
 const ISSUER_ETH_ADDRESS  = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
 const ISSUER_ETH_PRIVKEY  = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d';
 
-let eccPrivateKey;   // returned from /issuer/register
 let credentialId;    // returned from /credential/issue
 let proofData;       // returned from /proof/generate
 
@@ -78,14 +77,10 @@ async function step1_registerIssuer() {
 
   assert(status === 201 || status === 409, `HTTP status should be 201 or 409, got ${status}`);
   if (status === 201) {
-    eccPrivateKey = body.issuer.eccPrivateKey;
-    assert(!!eccPrivateKey, 'eccPrivateKey should be returned');
-    console.log('  eccPrivateKey received (store securely):', eccPrivateKey.slice(0, 16) + '...');
+    assert(!!body.issuer.eccPublicKey, 'eccPublicKey should be returned');
+    console.log('  Issuer registered. eccPublicKey:', body.issuer.eccPublicKey.slice(0, 20) + '...');
   } else {
-    console.log('  Issuer already registered — skipping (re-use existing eccPrivateKey)');
-    console.log('  NOTE: If this is a fresh test, clear backend/storage/data.json first');
-    // For re-run, we cannot recover eccPrivateKey — fresh test required
-    process.exit(0);
+    console.log('  Issuer already registered — continuing (eccPrivateKey stored in backend DB)');
   }
 }
 
@@ -93,7 +88,6 @@ async function step2_issueCredential() {
   console.log('\n--- STEP 2: Issue Credential ---');
   const { status, body } = await post('/credential/issue', {
     issuerAddress: ISSUER_ETH_ADDRESS,
-    eccPrivateKey,
     studentId: 'SV-2021-001',
     studentName: 'Nguyen Van A',
     courses: [
