@@ -10,8 +10,8 @@ describe('CredentialRegistry', function () {
   let registry;
   let owner, issuer1, issuer2, other;
 
-  const CREDENTIAL_ID = ethers.keccak256(ethers.toUtf8Bytes('student001:issuer1'));
-  const MERKLE_ROOT = ethers.keccak256(ethers.toUtf8Bytes('merkle_root_hash'));
+  const CRED_HASH = ethers.keccak256(ethers.toUtf8Bytes('test-credential-hash'));
+  const CRED_HASH_2 = ethers.keccak256(ethers.toUtf8Bytes('test-credential-hash-2'));
 
   beforeEach(async function () {
     [owner, issuer1, issuer2, other] = await ethers.getSigners();
@@ -20,119 +20,140 @@ describe('CredentialRegistry', function () {
   });
 
   // -------------------------------------------------------------------------
-  // Issuer management
+  // Ownership
   // -------------------------------------------------------------------------
-  describe('registerIssuer', function () {
-    it('owner can register issuer', async function () {
-      await registry.registerIssuer(issuer1.address);
-      expect(await registry.isIssuerAuthorized(issuer1.address)).to.be.true;
-    });
-
-    it('non-owner cannot register issuer', async function () {
-      await expect(registry.connect(other).registerIssuer(issuer1.address)).to.be.revertedWith('Not owner');
-    });
-
-    it('cannot register same issuer twice', async function () {
-      await registry.registerIssuer(issuer1.address);
-      await expect(registry.registerIssuer(issuer1.address)).to.be.revertedWith('Already registered');
+  describe('owner', function () {
+    it('deployer is owner', async function () {
+      expect(await registry.owner()).to.equal(owner.address);
     });
   });
 
+  // -------------------------------------------------------------------------
+  // addIssuer
+  // -------------------------------------------------------------------------
+  describe('addIssuer', function () {
+    it('owner can add issuer', async function () {
+      await registry.addIssuer(issuer1.address);
+      expect(await registry.isAuthorizedIssuer(issuer1.address)).to.be.true;
+    });
+
+    it('authorizedIssuers mapping is updated', async function () {
+      await registry.addIssuer(issuer1.address);
+      expect(await registry.authorizedIssuers(issuer1.address)).to.be.true;
+    });
+
+    it('emits IssuerAdded', async function () {
+      await expect(registry.addIssuer(issuer1.address))
+        .to.emit(registry, 'IssuerAdded')
+        .withArgs(issuer1.address);
+    });
+
+    it('non-owner cannot add issuer', async function () {
+      await expect(registry.connect(other).addIssuer(issuer1.address))
+        .to.be.revertedWith('Not owner');
+    });
+
+    it('reverts on zero address', async function () {
+      await expect(registry.addIssuer(ethers.ZeroAddress))
+        .to.be.revertedWith('Zero address');
+    });
+
+    it('can add same issuer multiple times (idempotent)', async function () {
+      await registry.addIssuer(issuer1.address);
+      await registry.addIssuer(issuer1.address); // no revert
+      expect(await registry.isAuthorizedIssuer(issuer1.address)).to.be.true;
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // removeIssuer
+  // -------------------------------------------------------------------------
   describe('removeIssuer', function () {
-    beforeEach(async () => registry.registerIssuer(issuer1.address));
+    beforeEach(async function () {
+      await registry.addIssuer(issuer1.address);
+    });
 
     it('owner can remove issuer', async function () {
       await registry.removeIssuer(issuer1.address);
-      expect(await registry.isIssuerAuthorized(issuer1.address)).to.be.false;
+      expect(await registry.isAuthorizedIssuer(issuer1.address)).to.be.false;
+    });
+
+    it('emits IssuerRemoved', async function () {
+      await expect(registry.removeIssuer(issuer1.address))
+        .to.emit(registry, 'IssuerRemoved')
+        .withArgs(issuer1.address);
     });
 
     it('non-owner cannot remove issuer', async function () {
-      await expect(registry.connect(other).removeIssuer(issuer1.address)).to.be.revertedWith('Not owner');
+      await expect(registry.connect(other).removeIssuer(issuer1.address))
+        .to.be.revertedWith('Not owner');
     });
   });
 
   // -------------------------------------------------------------------------
-  // Credential management
+  // revokeCredential
   // -------------------------------------------------------------------------
-  describe('issueCredential', function () {
-    beforeEach(async () => registry.registerIssuer(issuer1.address));
-
-    it('authorized issuer can issue credential', async function () {
-      await registry.connect(issuer1).issueCredential(CREDENTIAL_ID, MERKLE_ROOT);
-      expect(await registry.getMerkleRoot(CREDENTIAL_ID)).to.equal(MERKLE_ROOT);
-    });
-
-    it('unauthorized address cannot issue credential', async function () {
-      await expect(
-        registry.connect(other).issueCredential(CREDENTIAL_ID, MERKLE_ROOT)
-      ).to.be.revertedWith('Not authorized issuer');
-    });
-
-    it('cannot issue same credential twice', async function () {
-      await registry.connect(issuer1).issueCredential(CREDENTIAL_ID, MERKLE_ROOT);
-      await expect(
-        registry.connect(issuer1).issueCredential(CREDENTIAL_ID, MERKLE_ROOT)
-      ).to.be.revertedWith('Already issued');
-    });
-  });
-
   describe('revokeCredential', function () {
     beforeEach(async function () {
-      await registry.registerIssuer(issuer1.address);
-      await registry.connect(issuer1).issueCredential(CREDENTIAL_ID, MERKLE_ROOT);
+      await registry.addIssuer(issuer1.address);
     });
 
-    it('issuer can revoke their credential', async function () {
-      await registry.connect(issuer1).revokeCredential(CREDENTIAL_ID);
-      expect(await registry.isRevoked(CREDENTIAL_ID)).to.be.true;
+    it('authorized issuer can revoke credential', async function () {
+      await registry.connect(issuer1).revokeCredential(CRED_HASH);
+      expect(await registry.isRevoked(CRED_HASH)).to.be.true;
     });
 
-    it('other issuer cannot revoke', async function () {
-      await registry.registerIssuer(issuer2.address);
-      await expect(
-        registry.connect(issuer2).revokeCredential(CREDENTIAL_ID)
-      ).to.be.revertedWith('Not credential issuer');
+    it('revokedCredentials mapping is updated', async function () {
+      await registry.connect(issuer1).revokeCredential(CRED_HASH);
+      expect(await registry.revokedCredentials(CRED_HASH)).to.be.true;
     });
 
-    it('cannot revoke twice', async function () {
-      await registry.connect(issuer1).revokeCredential(CREDENTIAL_ID);
-      await expect(
-        registry.connect(issuer1).revokeCredential(CREDENTIAL_ID)
-      ).to.be.revertedWith('Already revoked');
+    it('emits CredentialRevoked', async function () {
+      await expect(registry.connect(issuer1).revokeCredential(CRED_HASH))
+        .to.emit(registry, 'CredentialRevoked')
+        .withArgs(CRED_HASH, issuer1.address);
+    });
+
+    it('non-issuer cannot revoke', async function () {
+      await expect(registry.connect(other).revokeCredential(CRED_HASH))
+        .to.be.revertedWith('Not authorized issuer');
+    });
+
+    it('cannot revoke same credential twice', async function () {
+      await registry.connect(issuer1).revokeCredential(CRED_HASH);
+      await expect(registry.connect(issuer1).revokeCredential(CRED_HASH))
+        .to.be.revertedWith('Already revoked');
+    });
+
+    it('removed issuer cannot revoke', async function () {
+      await registry.removeIssuer(issuer1.address);
+      await expect(registry.connect(issuer1).revokeCredential(CRED_HASH))
+        .to.be.revertedWith('Not authorized issuer');
+    });
+
+    it('different credentials can be revoked independently', async function () {
+      await registry.connect(issuer1).revokeCredential(CRED_HASH);
+      expect(await registry.isRevoked(CRED_HASH)).to.be.true;
+      expect(await registry.isRevoked(CRED_HASH_2)).to.be.false;
+    });
+
+    it('second issuer can also revoke credentials', async function () {
+      await registry.addIssuer(issuer2.address);
+      await registry.connect(issuer2).revokeCredential(CRED_HASH_2);
+      expect(await registry.isRevoked(CRED_HASH_2)).to.be.true;
     });
   });
 
   // -------------------------------------------------------------------------
-  // verifyCredential
+  // isAuthorizedIssuer / isRevoked
   // -------------------------------------------------------------------------
-  describe('verifyCredential', function () {
-    beforeEach(async function () {
-      await registry.registerIssuer(issuer1.address);
-      await registry.connect(issuer1).issueCredential(CREDENTIAL_ID, MERKLE_ROOT);
+  describe('read helpers', function () {
+    it('isAuthorizedIssuer returns false for unknown address', async function () {
+      expect(await registry.isAuthorizedIssuer(other.address)).to.be.false;
     });
 
-    it('valid credential returns true', async function () {
-      const [valid, root] = await registry.verifyCredential(CREDENTIAL_ID);
-      expect(valid).to.be.true;
-      expect(root).to.equal(MERKLE_ROOT);
-    });
-
-    it('revoked credential returns false', async function () {
-      await registry.connect(issuer1).revokeCredential(CREDENTIAL_ID);
-      const [valid] = await registry.verifyCredential(CREDENTIAL_ID);
-      expect(valid).to.be.false;
-    });
-
-    it('unknown credential returns false', async function () {
-      const [valid, root] = await registry.verifyCredential(ethers.keccak256(ethers.toUtf8Bytes('unknown')));
-      expect(valid).to.be.false;
-      expect(root).to.equal(ethers.ZeroHash);
-    });
-
-    it('credential becomes invalid when issuer removed', async function () {
-      await registry.removeIssuer(issuer1.address);
-      const [valid] = await registry.verifyCredential(CREDENTIAL_ID);
-      expect(valid).to.be.false;
+    it('isRevoked returns false for unknown hash', async function () {
+      expect(await registry.isRevoked(CRED_HASH)).to.be.false;
     });
   });
 });

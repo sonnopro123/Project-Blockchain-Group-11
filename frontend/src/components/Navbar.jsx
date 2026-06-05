@@ -3,9 +3,10 @@ import { Link, useLocation } from 'react-router-dom'
 import { APP_NAME, APP_ABBR } from '../config/branding'
 
 const links = [
-  { to: '/', label: 'Trang chủ' },
-  { to: '/issuer', label: 'Tổ chức cấp bằng' },
-  { to: '/student', label: 'Sinh viên' },
+  { to: '/',         label: 'Trang chủ' },
+  { to: '/admin',    label: 'Admin' },
+  { to: '/issuer',   label: 'Tổ chức cấp bằng' },
+  { to: '/student',  label: 'Sinh viên' },
   { to: '/verifier', label: 'Xác minh' },
 ]
 

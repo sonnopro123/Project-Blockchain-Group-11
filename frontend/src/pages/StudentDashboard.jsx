@@ -1,103 +1,165 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import DashboardLayout from '../layouts/DashboardLayout'
 import Card from '../components/Card'
 import Button from '../components/Button'
-import Input from '../components/Input'
 import Badge from '../components/Badge'
 import CopyField from '../components/CopyField'
-import StepGuide from '../components/StepGuide'
-import { getCredential, generateProof } from '../services/api'
+import { useToast } from '../components/Toast'
+import { connectWallet, walletError, getReadProvider } from '../services/wallet'
+import { isAuthorizedIssuer, isRevoked, CONTRACT_ADDRESS } from '../services/contract'
+import {
+  validateCredentialSchema, validateCredentialOffChain,
+  buildProofJSON,
+} from '../services/credential'
+import { downloadJSON } from '../utils/download'
 
-function friendlyError(e) {
-  const msg = e.response?.data?.error || e.message || 'Lỗi không xác định'
-  if (msg.includes('already registered')) return 'Tổ chức này đã được đăng ký rồi.'
-  if (msg.includes('Issuer not found')) return 'Issuer chưa đăng ký. Vào tab Đăng ký trước.'
-  if (msg.includes('not found') || msg.includes('Not found')) return 'Không tìm thấy. Kiểm tra lại ID.'
-  if (msg.includes('Already revoked')) return 'Credential này đã bị thu hồi trước đó rồi.'
-  if (msg.includes('ETIMEDOUT') || msg.includes('Network Error')) return 'Không kết nối được server. Kiểm tra backend đang chạy chưa (node backend/server.js).'
-  if (msg.includes('not in credential')) return 'Mã môn học không tồn tại trong credential này.'
-  return msg
+const TABS = [
+  { id: 'upload', label: 'Upload & Xác nhận' },
+  { id: 'proof',  label: 'Tạo Proof' },
+]
+
+function CheckRow({ label, desc, ok, skip }) {
+  const color = skip ? 'text-[#555]' : ok ? 'text-green-400' : 'text-red-400'
+  const icon  = skip ? '—' : ok ? '✓' : '✗'
+  return (
+    <div className="flex items-start gap-3 py-2.5 border-b border-[#1a1a1a] last:border-0">
+      <span className={`text-sm mt-0.5 ${color}`}>{icon}</span>
+      <div className="flex-1">
+        <p className="text-sm text-white">{label}</p>
+        {desc && <p className="text-xs text-[#555]">{desc}</p>}
+      </div>
+      {!skip && <Badge variant={ok ? 'green' : 'red'}>{ok ? 'Pass' : 'Fail'}</Badge>}
+    </div>
+  )
 }
 
+function short(addr) { return addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '' }
+
 export default function StudentDashboard() {
-  const [tab, setTab] = useState('view')
+  const toast = useToast()
+  const fileRef = useRef(null)
 
-  // Shared state giữa 2 tab
-  const [credId, setCredId] = useState('')
-  const [cred, setCred] = useState(null)
+  const [tab, setTab] = useState('upload')
+  const [wallet, setWallet] = useState(null)
+  const [credential, setCredential] = useState(null)     // parsed JSON
+  const [validation, setValidation] = useState(null)     // validation results
+  const [validating, setValidating] = useState(false)
+  const [connecting, setConnecting] = useState(false)
 
-  // Proof tab state
-  const [proofCredId, setProofCredId] = useState('')
-  const [proofCourses, setProofCourses] = useState([])
-  const [courseCode, setCourseCode] = useState('')
-  const [proof, setProof] = useState(null)
+  // Proof tab
+  const [selectedCourses, setSelectedCourses] = useState([])
+  const [proofResult, setProofResult] = useState(null)
 
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-
-  // History từ localStorage
-  const [history, setHistory] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('credentialHistory') || '[]') } catch { return [] }
-  })
-
-  const saveHistory = (id) => {
-    const next = [id, ...history.filter((h) => h !== id)].slice(0, 5)
-    setHistory(next)
-    localStorage.setItem('credentialHistory', JSON.stringify(next))
-  }
-
-  const fetchCred = async () => {
-    setError(''); setCred(null); setProof(null)
-    if (!credId) { setError('Nhập Credential ID'); return }
-    setLoading(true)
+  // ── Wallet ───────────────────────────────────────────────────────────────
+  const handleConnect = async () => {
+    setConnecting(true)
     try {
-      const res = await getCredential(credId)
-      setCred(res.data)
-      saveHistory(credId)
+      const w = await connectWallet()
+      setWallet(w)
+      toast.success(`Kết nối ví: ${short(w.address)}`)
     } catch (e) {
-      setError(friendlyError(e))
-    } finally { setLoading(false) }
-  }
-
-  // Load courses khi nhập credentialId ở tab proof
-  const fetchProofCourses = async (id) => {
-    if (!id) { setProofCourses([]); return }
-    try {
-      const res = await getCredential(id)
-      setProofCourses(res.data.courses || [])
-    } catch {
-      setProofCourses([])
+      toast.error(walletError(e))
+    } finally {
+      setConnecting(false)
     }
   }
 
-  const genProof = async () => {
-    setError(''); setProof(null)
-    if (!proofCredId || !courseCode) { setError('Nhập đầy đủ thông tin'); return }
-    setLoading(true)
+  // ── File upload ──────────────────────────────────────────────────────────
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
     try {
-      const res = await generateProof(proofCredId, courseCode)
-      setProof(res.data)
+      const text = await file.text()
+      const json = JSON.parse(text)
+      setCredential(json)
+      setValidation(null)
+      setProofResult(null)
+      setSelectedCourses([])
+      toast.info('Đã tải credential JSON. Nhấn "Xác nhận" để kiểm tra.')
+    } catch {
+      toast.error('File không hợp lệ. Hãy upload đúng credential JSON.')
+    }
+    // Reset file input so same file can be re-uploaded after delete
+    e.target.value = ''
+  }
+
+  const handleDelete = () => {
+    setCredential(null)
+    setValidation(null)
+    setProofResult(null)
+    setSelectedCourses([])
+    toast.info('Đã xóa credential. Upload file mới.')
+  }
+
+  // ── Validate ─────────────────────────────────────────────────────────────
+  const handleValidate = async () => {
+    if (!credential) return toast.error('Chưa upload credential')
+    if (!wallet)     return toast.error('Kết nối ví MetaMask trước')
+
+    setValidating(true)
+    try {
+      // Off-chain checks
+      const offChain = validateCredentialOffChain(credential, wallet.address)
+
+      // On-chain checks
+      const provider = wallet.provider || await getReadProvider()
+      const [issuerAuthorized, credRevoked] = await Promise.all([
+        isAuthorizedIssuer(provider, credential.issuerWallet).catch(() => false),
+        isRevoked(provider, credential.credentialHash).catch(() => false),
+      ])
+
+      const v = {
+        ...offChain,
+        issuerAuthorized,
+        notRevoked: !credRevoked,
+        valid: offChain.schema
+          && offChain.walletMatch
+          && offChain.hashConsistent
+          && offChain.signatureValid
+          && offChain.merkleRootConsistent
+          && issuerAuthorized
+          && !credRevoked,
+      }
+      setValidation(v)
+      if (v.valid) {
+        toast.success('Credential hợp lệ! Có thể tạo proof.')
+      } else {
+        toast.error('Credential không hợp lệ. Xem chi tiết bên dưới.')
+      }
     } catch (e) {
-      setError(friendlyError(e))
-    } finally { setLoading(false) }
+      toast.error(walletError(e))
+    } finally {
+      setValidating(false)
+    }
   }
 
-  const copyProofJson = () => {
-    if (!proof) return
-    const json = JSON.stringify(
-      { credentialId: proofCredId, proof: proof.proof, leaf: proof.leaf, courseCode: proof.courseCode, grade: proof.grade },
-      null,
-      2
+  // ── Proof ─────────────────────────────────────────────────────────────────
+  const toggleCourse = (code) => {
+    setSelectedCourses(prev =>
+      prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
     )
-    navigator.clipboard.writeText(json)
+    setProofResult(null)
   }
 
-  const TABS = [{ id: 'view', label: 'Xem văn bằng' }, { id: 'proof', label: 'Tạo Proof' }]
+  const handleGenerateProof = () => {
+    if (selectedCourses.length === 0) return toast.error('Chọn ít nhất 1 môn học')
+    const proof = buildProofJSON(credential, selectedCourses)
+    setProofResult(proof)
+    toast.success(`Proof cho ${selectedCourses.length} môn đã được tạo!`)
+  }
+
+  const handleDownloadProof = () => {
+    if (!proofResult) return
+    downloadJSON(proofResult, `proof-${credential.studentId}-${Date.now()}.json`)
+    toast.success('Đã tải xuống proof JSON')
+  }
+
+  const isValidated = validation?.valid === true
 
   return (
-    <DashboardLayout title="Sinh viên" subtitle="Xem văn bằng và tạo proof chọn lọc để chia sẻ">
+    <DashboardLayout title="Sinh viên" subtitle="Xác nhận văn bằng và tạo proof chọn lọc để chia sẻ">
       <div className="flex items-center gap-1 border border-[#1d1d1d] bg-[#0d0d0d] rounded-full p-1 w-fit mb-8">
-        {TABS.map((t) => (
+        {TABS.map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
@@ -106,198 +168,186 @@ export default function StudentDashboard() {
             }`}
           >
             {t.label}
+            {t.id === 'upload' && isValidated && <span className="ml-2 w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />}
           </button>
         ))}
       </div>
 
-      {tab === 'view' && (
+      {/* ── Tab: Upload & Validate ── */}
+      {tab === 'upload' && (
         <div className="max-w-xl space-y-4">
-          <StepGuide
-            steps={[
-              { title: 'Nhập Credential ID', desc: 'Lấy từ tổ chức cấp bằng' },
-              { title: 'Xem thông tin', desc: 'Kiểm tra hiệu lực và danh sách môn' },
-              { title: 'Sang tab Proof', desc: 'Tạo proof để chia sẻ với nhà tuyển dụng' },
-            ]}
-          />
-
+          {/* Connect wallet */}
           <Card>
-            <h2 className="text-base font-semibold text-white mb-4">Tra cứu văn bằng</h2>
-            <div className="flex gap-3">
-              <Input
-                placeholder="Nhập Credential ID (0x...)"
-                value={credId}
-                onChange={(e) => setCredId(e.target.value)}
-                className="flex-1"
-              />
-              <Button onClick={fetchCred} disabled={loading}>Tìm</Button>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-base font-semibold text-white">Ví sinh viên</h2>
+              {wallet
+                ? <Badge variant="green">{short(wallet.address)}</Badge>
+                : <Button size="sm" onClick={handleConnect} disabled={connecting}>
+                    {connecting ? '...' : '🦊 Kết nối MetaMask'}
+                  </Button>
+              }
             </div>
-
-            {history.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 mt-3">
-                <span className="text-xs text-[#888]">Đã tra cứu:</span>
-                {history.map((id) => (
-                  <button
-                    key={id}
-                    onClick={() => setCredId(id)}
-                    className="text-xs text-[#6c47ff] hover:underline font-mono"
-                  >
-                    {id.slice(0, 10)}...
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {error && <p className="text-red-400 text-xs mt-2">{error}</p>}
+            <p className="text-xs text-[#555]">
+              Ví của bạn phải khớp với địa chỉ <span className="text-white">studentWallet</span> trong credential để xác nhận quyền sở hữu.
+            </p>
           </Card>
 
-          {cred && (
-            <Card glow>
-              <div className="flex items-center gap-2 mb-5">
-                <Badge variant={cred.onChainValid ? 'green' : 'red'}>
-                  {cred.onChainValid ? '✓ Hợp lệ on-chain' : '✗ Không hợp lệ'}
-                </Badge>
-                {cred.revoked && <Badge variant="red">Đã thu hồi</Badge>}
-              </div>
-              <div className="space-y-3 text-sm">
-                <InfoRow label="Sinh viên" value={cred.studentName} />
-                <InfoRow label="Mã SV" value={cred.studentId} />
-                <CopyField label="Tổ chức cấp" value={cred.issuerAddress} />
-                <CopyField label="Merkle Root" value={cred.merkleRoot} />
-                <InfoRow label="Thời gian cấp" value={new Date(cred.issuedAt).toLocaleString('vi-VN')} />
-              </div>
-
-              <div className="mt-5 border-t border-[#1d1d1d] pt-5">
-                <p className="text-xs text-[#555] mb-3 font-medium uppercase tracking-widest">Bảng điểm</p>
-                <div className="space-y-2">
-                  {cred.courses?.map((c) => (
-                    <div key={c.courseCode} className="flex justify-between items-center py-1.5 border-b border-[#1a1a1a] last:border-0">
-                      <div>
-                        <span className="text-sm text-white font-mono">{c.courseCode}</span>
-                        {c.courseName && <span className="text-xs text-[#888] ml-2">{c.courseName}</span>}
-                      </div>
-                      <Badge variant="purple">{c.grade}</Badge>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="mt-4 pt-4 border-t border-[#1d1d1d]">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    setProofCredId(credId)
-                    fetchProofCourses(credId)
-                    setTab('proof')
-                  }}
+          {/* File upload */}
+          <Card>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-base font-semibold text-white">Upload Credential JSON</h2>
+              {credential && (
+                <button
+                  onClick={handleDelete}
+                  className="text-xs text-red-400 hover:text-red-300 transition-colors"
                 >
-                  → Tạo Proof từ văn bằng này
-                </Button>
+                  🗑 Xóa file
+                </button>
+              )}
+            </div>
+
+            {!credential ? (
+              <div>
+                <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={handleFileChange} />
+                <button
+                  onClick={() => fileRef.current?.click()}
+                  className="w-full border-2 border-dashed border-[#333] hover:border-[#6c47ff] rounded-xl py-8 text-center transition-colors"
+                >
+                  <p className="text-[#555] text-sm">Click để chọn file credential.json</p>
+                  <p className="text-[#444] text-xs mt-1">Nhận từ trường đại học sau khi tốt nghiệp</p>
+                </button>
               </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 p-3 bg-[#0f0f0f] border border-[#1a1a1a] rounded-xl">
+                  <span className="text-green-400 text-sm">✓</span>
+                  <div className="flex-1">
+                    <p className="text-sm text-white">{credential.universityName || 'Credential'}</p>
+                    <p className="text-xs text-[#555]">{credential.studentName} — {credential.studentId}</p>
+                  </div>
+                  <Badge variant="purple">{credential.courses?.length || 0} môn</Badge>
+                </div>
+                <Button onClick={handleValidate} disabled={validating || !wallet} className="w-full">
+                  {validating ? 'Đang xác nhận...' : 'Xác nhận văn bằng (on-chain + ECC + Merkle)'}
+                </Button>
+                {!wallet && <p className="text-yellow-500 text-xs text-center">Kết nối MetaMask trước khi xác nhận</p>}
+              </div>
+            )}
+          </Card>
+
+          {/* Validation results */}
+          {validation && (
+            <Card glow={validation.valid}>
+              <div className={`rounded-xl p-4 mb-5 border ${validation.valid ? 'bg-green-500/5 border-green-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
+                <div className="text-2xl mb-1">{validation.valid ? '✅' : '❌'}</div>
+                <p className={`text-base font-bold ${validation.valid ? 'text-green-400' : 'text-red-400'}`}>
+                  {validation.valid ? 'Văn bằng hợp lệ' : 'Văn bằng không hợp lệ'}
+                </p>
+                {validation.error && <p className="text-xs text-red-400 mt-1">{validation.error}</p>}
+              </div>
+              <p className="text-xs text-[#444] font-medium uppercase tracking-widest mb-3">Chi tiết kiểm tra</p>
+              <CheckRow label="Schema JSON đúng" ok={validation.schema} />
+              <CheckRow label="Ví sinh viên khớp" desc={`JSON: ${short(credential?.studentWallet)}  |  Ví connect: ${short(wallet?.address)}`} ok={validation.walletMatch} />
+              <CheckRow label="Issuer được ủy quyền on-chain" desc="Kiểm tra registry contract" ok={validation.issuerAuthorized} />
+              <CheckRow label="Chữ ký ECC (MetaMask) hợp lệ" desc="Issuer đã ký credentialHash bằng ví của mình" ok={validation.signatureValid} />
+              <CheckRow label="Credential chưa bị thu hồi" desc="Kiểm tra revokedCredentials on-chain" ok={validation.notRevoked} />
+              <CheckRow label="Merkle Root nhất quán" desc="Tính lại từ bảng điểm, so sánh với JSON" ok={validation.merkleRootConsistent} />
+              <CheckRow label="Credential Hash nhất quán" desc="Tính lại từ các trường, so sánh với JSON" ok={validation.hashConsistent} />
+
+              {validation.valid && (
+                <div className="mt-4 pt-4 border-t border-[#1d1d1d]">
+                  <button
+                    onClick={() => setTab('proof')}
+                    className="text-sm text-[#6c47ff] hover:text-white transition-colors font-medium"
+                  >
+                    → Chuyển sang "Tạo Proof"
+                  </button>
+                </div>
+              )}
             </Card>
           )}
         </div>
       )}
 
+      {/* ── Tab: Tạo Proof ── */}
       {tab === 'proof' && (
         <div className="max-w-xl space-y-4">
-          <StepGuide
-            steps={[
-              { title: 'Nhập Credential ID', desc: 'Hoặc chuyển từ tab Xem văn bằng' },
-              { title: 'Chọn môn cần chứng minh', desc: 'Chỉ môn này được tiết lộ' },
-              { title: 'Copy JSON Proof', desc: 'Gửi cho Verifier (nhà tuyển dụng)' },
-            ]}
-          />
+          {!credential || !isValidated ? (
+            <Card>
+              <p className="text-yellow-400 text-sm">
+                ⚠ Cần upload và xác nhận credential thành công ở tab trước.
+              </p>
+            </Card>
+          ) : (
+            <>
+              <Card>
+                <h2 className="text-base font-semibold text-white mb-1">Chọn môn cần tiết lộ</h2>
+                <p className="text-xs text-[#555] mb-4">
+                  Verifier chỉ thấy các môn được chọn — các môn còn lại vẫn ẩn hoàn toàn.
+                </p>
+                <div className="space-y-2">
+                  {credential.courses.map((c) => (
+                    <label
+                      key={c.courseCode}
+                      className="flex items-center gap-3 px-3 py-2.5 bg-[#0f0f0f] border border-[#1a1a1a] rounded-xl cursor-pointer hover:border-[#6c47ff]/40 transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedCourses.includes(c.courseCode)}
+                        onChange={() => toggleCourse(c.courseCode)}
+                        className="accent-[#6c47ff] w-4 h-4"
+                      />
+                      <span className="text-xs font-mono text-[#888] w-20 shrink-0">{c.courseCode}</span>
+                      <span className="text-xs text-[#555] flex-1 truncate">{c.courseName}</span>
+                      <Badge variant="purple">{c.grade}</Badge>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-[#555] mt-3">Đã chọn: <span className="text-white">{selectedCourses.length}</span> / {credential.courses.length} môn</p>
 
-          <Card>
-            <h2 className="text-base font-semibold text-white mb-2">Tạo Proof chọn lọc</h2>
-            <p className="text-xs text-[#666] mb-5">Chỉ tiết lộ đúng 1 môn học — Verifier không thấy các môn còn lại.</p>
-            <div className="space-y-4">
-              <div>
-                <Input
-                  label="Credential ID"
-                  placeholder="0x..."
-                  value={proofCredId}
-                  onChange={(e) => {
-                    setProofCredId(e.target.value)
-                    fetchProofCourses(e.target.value)
-                  }}
-                />
-              </div>
+                <Button
+                  onClick={handleGenerateProof}
+                  disabled={selectedCourses.length === 0}
+                  className="w-full mt-4"
+                >
+                  Tạo Merkle Proof
+                </Button>
+              </Card>
 
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-[#888]">Môn cần chứng minh</span>
-                {proofCourses.length > 0 ? (
-                  <select
-                    value={courseCode}
-                    onChange={(e) => setCourseCode(e.target.value)}
-                    className="w-full bg-[#0a0a0a] border border-[#222] rounded-xl px-4 py-2.5 text-white text-sm focus:border-[#6c47ff] outline-none transition-colors"
-                  >
-                    <option value="">-- Chọn môn học --</option>
-                    {proofCourses.map((c) => (
-                      <option key={c.courseCode} value={c.courseCode}>
-                        {c.courseCode}{c.courseName ? ` — ${c.courseName}` : ''} ({c.grade})
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <Input
-                    placeholder="VD: IT4527E"
-                    value={courseCode}
-                    onChange={(e) => setCourseCode(e.target.value)}
-                  />
-                )}
-              </div>
+              {proofResult && (
+                <Card glow>
+                  <div className="flex items-center gap-2 mb-4">
+                    <Badge variant="purple">Proof đã tạo</Badge>
+                    <span className="text-sm text-white">{proofResult.selectedCourses.length} môn được tiết lộ</span>
+                  </div>
 
-              {error && <p className="text-red-400 text-xs">{error}</p>}
-              <Button onClick={genProof} disabled={loading} className="w-full">
-                {loading ? 'Đang tạo...' : 'Tạo Merkle Proof'}
-              </Button>
-            </div>
-          </Card>
+                  <div className="space-y-2 mb-4">
+                    <CopyField label="Credential ID" value={proofResult.credentialId} />
+                    <CopyField label="Merkle Root" value={proofResult.merkleRoot} />
+                  </div>
 
-          {proof && (
-            <Card glow>
-              <div className="flex items-center gap-2 mb-4">
-                <Badge variant="purple">Proof đã tạo</Badge>
-                <span className="text-sm text-white">{proof.courseCode} — {proof.grade}</span>
-              </div>
-              <div className="space-y-3">
-                <CopyField label="Leaf Hash" value={proof.leaf} />
-                <CopyField label="Merkle Root" value={proof.root} />
-                <div>
-                  <span className="text-[#555] text-xs block mb-1">Proof Path ({proof.proof?.length} nodes)</span>
-                  <div className="bg-[#0a0a0a] rounded-lg p-3 space-y-1 max-h-40 overflow-y-auto">
-                    {proof.proof?.map((p, i) => (
-                      <p key={i} className="font-mono text-[#666] text-xs break-all">{p}</p>
+                  <div className="space-y-2 mb-4">
+                    {proofResult.selectedCourses.map((sc, i) => (
+                      <div key={i} className="p-3 bg-[#0f0f0f] border border-[#1a1a1a] rounded-xl">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-mono text-white">{sc.courseCode}</span>
+                          <Badge variant="purple">{sc.grade}</Badge>
+                        </div>
+                        <p className="text-xs text-[#555]">Proof nodes: {sc.merkleProof.length}</p>
+                        <p className="text-xs text-[#444] font-mono truncate mt-1">leaf: {sc.leafHash}</p>
+                      </div>
                     ))}
                   </div>
-                </div>
-              </div>
-              <div className="mt-4 border-t border-[#1d1d1d] pt-4 space-y-3">
-                <p className="text-xs text-[#666]">Copy JSON này để gửi cho Verifier:</p>
-                <textarea
-                  readOnly
-                  value={JSON.stringify({ credentialId: proofCredId, proof: proof.proof, leaf: proof.leaf, courseCode: proof.courseCode, grade: proof.grade }, null, 2)}
-                  className="w-full bg-[#0a0a0a] border border-[#222] rounded-lg p-3 text-xs font-mono text-[#666] h-32 resize-none outline-none"
-                />
-                <Button onClick={copyProofJson} variant="primary" className="w-full">
-                  📋 Copy JSON Proof
-                </Button>
-              </div>
-            </Card>
+
+                  <Button onClick={handleDownloadProof} className="w-full">
+                    ⬇ Tải proof.json (gửi cho Verifier)
+                  </Button>
+                </Card>
+              )}
+            </>
           )}
         </div>
       )}
     </DashboardLayout>
-  )
-}
-
-function InfoRow({ label, value, mono }) {
-  return (
-    <div>
-      <span className="text-[#555] text-xs block mb-0.5">{label}</span>
-      <span className={`text-[#bbb] break-all ${mono ? 'font-mono text-xs' : 'text-sm'}`}>{value}</span>
-    </div>
   )
 }

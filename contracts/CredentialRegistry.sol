@@ -2,32 +2,24 @@
 pragma solidity ^0.8.20;
 
 /// @title CredentialRegistry
-/// @notice On-chain registry for authorized issuers and revoked credentials.
+/// @notice On-chain registry of authorized issuers (universities) and revoked credentials.
+///         Credentials are issued and signed off-chain (ECC via MetaMask).
+///         Only the revocation list and issuer registry live on-chain.
 contract CredentialRegistry {
     address public owner;
 
-    // Authorized issuers (universities)
-    mapping(address => bool) private authorizedIssuers;
+    /// @notice Authorized issuer addresses (universities).
+    mapping(address => bool) public authorizedIssuers;
 
-    // credentialId => merkleRoot stored on-chain
-    mapping(bytes32 => bytes32) private credentialMerkleRoot;
-
-    // credentialId => issuer who issued it
-    mapping(bytes32 => address) private credentialIssuer;
-
-    // Revocation list
-    mapping(bytes32 => bool) private revokedCredentials;
-
-    // Track issued credential ids per issuer (for enumeration)
-    mapping(address => bytes32[]) private issuerCredentials;
+    /// @notice Revoked credential hashes.
+    mapping(bytes32 => bool) public revokedCredentials;
 
     // -----------------------------------------------------------------------
     // Events
     // -----------------------------------------------------------------------
-    event IssuerRegistered(address indexed issuer);
+    event IssuerAdded(address indexed issuer);
     event IssuerRemoved(address indexed issuer);
-    event CredentialIssued(bytes32 indexed credentialId, address indexed issuer, bytes32 merkleRoot);
-    event CredentialRevoked(bytes32 indexed credentialId, address indexed issuer);
+    event CredentialRevoked(bytes32 indexed credentialHash, address indexed revokedBy);
 
     // -----------------------------------------------------------------------
     // Modifiers
@@ -50,90 +42,45 @@ contract CredentialRegistry {
     }
 
     // -----------------------------------------------------------------------
-    // Issuer Management
+    // Issuer Management — onlyOwner
     // -----------------------------------------------------------------------
 
-    /// @notice Owner registers a new authorized issuer.
-    function registerIssuer(address issuer) external onlyOwner {
+    /// @notice Owner adds an authorized issuer (university).
+    function addIssuer(address issuer) external onlyOwner {
         require(issuer != address(0), "Zero address");
-        require(!authorizedIssuers[issuer], "Already registered");
         authorizedIssuers[issuer] = true;
-        emit IssuerRegistered(issuer);
+        emit IssuerAdded(issuer);
     }
 
-    /// @notice Owner removes an existing authorized issuer.
+    /// @notice Owner removes an authorized issuer.
     function removeIssuer(address issuer) external onlyOwner {
-        require(authorizedIssuers[issuer], "Not registered");
         authorizedIssuers[issuer] = false;
         emit IssuerRemoved(issuer);
     }
 
+    // -----------------------------------------------------------------------
+    // Revocation — onlyAuthorizedIssuer
+    // -----------------------------------------------------------------------
+
+    /// @notice Authorized issuer revokes a credential by its off-chain hash.
+    /// @param credentialHash  keccak256 hash of the credential fields (computed off-chain).
+    function revokeCredential(bytes32 credentialHash) external onlyAuthorizedIssuer {
+        require(!revokedCredentials[credentialHash], "Already revoked");
+        revokedCredentials[credentialHash] = true;
+        emit CredentialRevoked(credentialHash, msg.sender);
+    }
+
+    // -----------------------------------------------------------------------
+    // Read-only helpers
+    // -----------------------------------------------------------------------
+
     /// @notice Check if an address is an authorized issuer.
-    function isIssuerAuthorized(address issuer) external view returns (bool) {
+    function isAuthorizedIssuer(address issuer) external view returns (bool) {
         return authorizedIssuers[issuer];
     }
 
-    // -----------------------------------------------------------------------
-    // Credential Management
-    // -----------------------------------------------------------------------
-
-    /// @notice Authorized issuer stores a credential's Merkle root on-chain.
-    /// @param credentialId  keccak256 hash uniquely identifying the credential.
-    /// @param merkleRoot    Root of the Merkle tree built from the transcript.
-    function issueCredential(bytes32 credentialId, bytes32 merkleRoot) external onlyAuthorizedIssuer {
-        require(credentialMerkleRoot[credentialId] == bytes32(0), "Already issued");
-        require(merkleRoot != bytes32(0), "Empty merkle root");
-
-        credentialMerkleRoot[credentialId] = merkleRoot;
-        credentialIssuer[credentialId] = msg.sender;
-        issuerCredentials[msg.sender].push(credentialId);
-
-        emit CredentialIssued(credentialId, msg.sender, merkleRoot);
-    }
-
-    /// @notice Authorized issuer (the original one) revokes a credential.
-    function revokeCredential(bytes32 credentialId) external onlyAuthorizedIssuer {
-        require(credentialIssuer[credentialId] == msg.sender, "Not credential issuer");
-        require(!revokedCredentials[credentialId], "Already revoked");
-
-        revokedCredentials[credentialId] = true;
-        emit CredentialRevoked(credentialId, msg.sender);
-    }
-
-    /// @notice Check validity: credential exists, not revoked, issuer still authorized.
-    /// @return valid       Whether the credential is currently valid.
-    /// @return merkleRoot  The stored Merkle root (bytes32(0) if not found).
-    function verifyCredential(bytes32 credentialId)
-        external
-        view
-        returns (bool valid, bytes32 merkleRoot)
-    {
-        merkleRoot = credentialMerkleRoot[credentialId];
-        if (merkleRoot == bytes32(0)) {
-            return (false, bytes32(0));
-        }
-        if (revokedCredentials[credentialId]) {
-            return (false, merkleRoot);
-        }
-        address issuer = credentialIssuer[credentialId];
-        if (!authorizedIssuers[issuer]) {
-            return (false, merkleRoot);
-        }
-        return (true, merkleRoot);
-    }
-
-    /// @notice Returns whether a credential has been revoked.
-    function isRevoked(bytes32 credentialId) external view returns (bool) {
-        return revokedCredentials[credentialId];
-    }
-
-    /// @notice Returns the Merkle root stored for a credential.
-    function getMerkleRoot(bytes32 credentialId) external view returns (bytes32) {
-        return credentialMerkleRoot[credentialId];
-    }
-
-    /// @notice Returns the issuer address for a credential.
-    function getCredentialIssuer(bytes32 credentialId) external view returns (address) {
-        return credentialIssuer[credentialId];
+    /// @notice Check if a credential has been revoked.
+    function isRevoked(bytes32 credentialHash) external view returns (bool) {
+        return revokedCredentials[credentialHash];
     }
 }

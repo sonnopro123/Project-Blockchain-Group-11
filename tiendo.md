@@ -1,7 +1,7 @@
 # Tiến độ dự án — CredProof
 ### Decentralized Academic Credential Verification
 
-Cập nhật lần cuối: 2026-05-31
+Cập nhật lần cuối: 2026-06-05
 
 ---
 
@@ -9,17 +9,15 @@ Cập nhật lần cuối: 2026-05-31
 
 | Hạng mục | Trạng thái | Ghi chú |
 |----------|-----------|---------|
-| Smart Contract | ✅ Hoàn thành | Deployed local Hardhat |
-| ECC Engine | ✅ Hoàn thành | Unit test pass |
-| Merkle Engine | ✅ Hoàn thành | Unit test pass |
-| Backend API | ✅ Hoàn thành | Chạy port 3000 |
-| Blockchain Service | ✅ Hoàn thành | Kết nối Hardhat local |
-| End-to-End Test | ✅ Script đã fix | Sẵn sàng chạy: node test/e2e.test.js |
-| Frontend Sprint 1 | ✅ Hoàn thành | Landing + IssuerDashboard |
+| Smart Contract | ✅ Hoàn thành | Rewritten: addIssuer/removeIssuer/revokeCredential, 20 test pass |
+| ECC Engine | ✅ Hoàn thành | MetaMask EIP-191 personal sign (frontend), no backend keys |
+| Merkle Engine | ✅ Hoàn thành | Frontend pure ethers.js — sortPairs=true |
+| Backend API | ✅ Legacy (backend) | Không dùng cho luồng chính — MetaMask flow là frontend-only |
+| Blockchain Service | ✅ Hoàn thành | Frontend services: wallet.js, contract.js |
+| End-to-End Test | ✅ Contract test 20/20 | test/CredentialRegistry.test.js |
+| Frontend Sprint 1 | ✅ Hoàn thành | Landing + AdminDashboard + IssuerDashboard |
 | Frontend Sprint 2 | ✅ Hoàn thành | StudentDashboard + VerifierDashboard |
-| Frontend UX | ✅ Hoàn thành | Toast, Tooltip, WorkflowStepper, Context |
-| Branding | ✅ Hoàn thành | CredProof — Decentralized Academic Credential Verification |
-| Bug Fix: Re-issue | ✅ Hoàn thành | Credential revoked → cho phép issue lại |
+| Refactor MetaMask | ✅ Hoàn thành | 2026-06-05 — xem LỊCH SỬ |
 | Bug Fix: CORS + eccPrivateKey | ✅ Hoàn thành | 2026-05-31 — xem LỊCH SỬ |
 
 ---
@@ -28,17 +26,16 @@ Cập nhật lần cuối: 2026-05-31
 
 ### MODULE A — Smart Contract
 **File:** `contracts/CredentialRegistry.sol`
-**Trạng thái:** ✅ Deployed local
+**Trạng thái:** ✅ Rewritten + 20 test all pass
 
-Đã implement:
-- `registerIssuer()` — onlyOwner
-- `removeIssuer()` — onlyOwner
-- `issueCredential(credentialId, merkleRoot)` — onlyAuthorizedIssuer
-- `revokeCredential(credentialId)` — onlyAuthorizedIssuer (issuer gốc)
-- `verifyCredential()` — kiểm tra valid + not revoked + issuer authorized
-- `isIssuerAuthorized()`, `getMerkleRoot()`, `isRevoked()`
+Đã implement (phiên bản mới — 2026-06-05):
+- `addIssuer(address)` — onlyOwner
+- `removeIssuer(address)` — onlyOwner
+- `revokeCredential(bytes32 credentialHash)` — onlyAuthorizedIssuer
+- `isAuthorizedIssuer(address)`, `isRevoked(bytes32)`, `owner()`
+- Events: `IssuerAdded`, `IssuerRemoved`, `CredentialRevoked`
 
-Test: `test/CredentialRegistry.test.js` — 10+ case, all pass
+Test: `test/CredentialRegistry.test.js` — 20 case, all pass
 
 ---
 
@@ -119,24 +116,23 @@ Test: `test/eccMerkle.test.js` — all pass
 
 ### FRONTEND
 **Thư mục:** `frontend/`
-**Trạng thái:** ✅ Hoàn thành — Chạy port 5173
+**Trạng thái:** ✅ Hoàn thành — Chạy port 5173 — Build pass (206 modules)
 
 | Trang / Component | Trạng thái |
 |-------------------|-----------|
-| Landing Page | ✅ CredProof branding + tagline |
-| Issuer Dashboard (3 tab) | ✅ Register → Issue → Revoke |
-| Student Dashboard | ✅ Xem credential + generate proof |
-| Verifier Dashboard | ✅ Verify proof |
-| Toast notifications | ✅ success / error / info |
-| WorkflowStepper | ✅ 3 bước có trạng thái |
-| Tooltip | ✅ Hover info |
-| IssuerContext | ✅ Share state giữa tabs |
-| CourseInput autocomplete | ✅ 26 môn học mẫu |
-| Kết quả phát hành | ✅ credentialId, merkleRoot, sig r/s, course list |
-| RevokeTab auto-fill | ✅ Lấy credentialId từ localStorage |
-| Branding constants | ✅ `frontend/src/config/branding.js` |
+| Landing Page | ✅ 4 role cards (Admin/Issuer/Student/Verifier) |
+| Admin Dashboard | ✅ addIssuer / removeIssuer / check status |
+| Issuer Dashboard (3 tab) | ✅ MetaMask connect → sign credential → revoke |
+| Student Dashboard | ✅ Upload + validate (7 checks) + selective proof |
+| Verifier Dashboard | ✅ Upload proof + on-chain + ECC + Merkle verify |
+| services/wallet.js | ✅ connectWallet, getReadProvider |
+| services/contract.js | ✅ addIssuer, removeIssuer, revokeCredential, isAuthorizedIssuer, isRevoked |
+| services/merkle.js | ✅ generateRoot, generateProof, verifyProof (pure ethers.js) |
+| services/credential.js | ✅ computeCredentialHash, signCredential, verifyCredentialSignature, buildProofJSON |
+| config/abi.js | ✅ ABI cho CredentialRegistry contract mới |
+| utils/download.js | ✅ downloadJSON helper |
 
-Stack: React 18 + Vite 5 + TailwindCSS + Axios + Framer Motion
+Stack: React 18 + Vite 5 + TailwindCSS + ethers.js v6
 
 ---
 
@@ -155,12 +151,14 @@ Stack: React 18 + Vite 5 + TailwindCSS + Axios + Framer Motion
 
 ## VIỆC CÒN LẠI
 
-### Ưu tiên cao
-- [ ] Khởi động 3 service (hardhat node + deploy + backend) rồi chạy `node test/e2e.test.js`
-- [ ] Test thủ công demo flow 9 bước trên frontend tại localhost:5173
-
-### Ưu tiên trung bình
-- [ ] Test StudentDashboard + VerifierDashboard kết nối backend thực tế
+### Ưu tiên cao (chuẩn bị demo)
+1. Khởi động Hardhat node: `npx hardhat node`
+2. Deploy contract: `npx hardhat run scripts/deploy.js --network localhost`
+3. Copy CONTRACT_ADDRESS → `frontend/.env` (VITE_CONTRACT_ADDRESS=0x...)
+4. Chạy frontend: `cd frontend && npm run dev`
+5. Cấu hình MetaMask: Network localhost:8545, chainId 31337
+6. Import Account #0 (owner) và Account #1 (issuer) vào MetaMask
+7. Test demo flow: Admin addIssuer → Issuer sign credential → Student validate + proof → Verifier verify
 
 ### Ưu tiên thấp (demo cuối)
 - [ ] Deploy contract lên Sepolia testnet
@@ -185,3 +183,4 @@ Stack: React 18 + Vite 5 + TailwindCSS + Axios + Framer Motion
 | 2026-05-11 | Cập nhật readme.md (business logic rules, UX rules, security rules, demo flow 9 bước) |
 | 2026-05-11 | Remove claude.md khỏi git tracking; cập nhật .gitignore |
 | 2026-05-31 | Fix CORS, eccPrivateKey storage, deploy script auto-write, frontend cleanup, e2e test update |
+| 2026-06-05 | Refactor toàn bộ: contract mới (addIssuer/revokeCredential), MetaMask signing, AdminDashboard, frontend services (wallet/contract/merkle/credential), build pass 206 modules |
