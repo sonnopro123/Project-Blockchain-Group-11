@@ -19,13 +19,32 @@ let ownerWallet;
 let contract;
 
 function init(rpcUrl, ownerPrivateKey, contractAddress) {
+  if (!rpcUrl) {
+    console.warn('[blockchain] RPC_URL not set — blockchain features disabled');
+    return;
+  }
+  if (!ownerPrivateKey) {
+    console.warn('[blockchain] OWNER_PRIVATE_KEY not set — blockchain features disabled');
+    return;
+  }
   provider = new ethers.JsonRpcProvider(rpcUrl);
   ownerWallet = new ethers.Wallet(ownerPrivateKey, provider);
+
+  if (!contractAddress) {
+    console.warn('[blockchain] CONTRACT_ADDRESS is empty — deploy contract first, then restart backend');
+    return;
+  }
   contract = new ethers.Contract(contractAddress, contractABI, ownerWallet);
+  console.log('[blockchain] Contract ready at', contractAddress);
 }
 
 function _ensureInit() {
-  if (!contract) throw new Error('blockchainService not initialized. Call init() first.');
+  if (!contract) {
+    throw new Error(
+      'CONTRACT_ADDRESS chưa được cấu hình. ' +
+      'Chạy: npx hardhat run scripts/deploy.js --network localhost, sau đó restart backend.'
+    );
+  }
 }
 
 function _contractAs(privateKey) {

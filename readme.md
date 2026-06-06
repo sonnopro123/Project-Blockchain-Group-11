@@ -219,6 +219,9 @@ PORT=3000
 
 ## Chạy project (local Hardhat)
 
+> ⚠️ **Chạy đúng thứ tự** — backend phải start **sau** khi deploy contract.  
+> Nếu `CONTRACT_ADDRESS` còn trống trong `.env`, backend sẽ báo lỗi khi có request gọi blockchain.
+
 Mở **4 terminal**, chạy theo thứ tự:
 
 ### Terminal 1 — Khởi động Hardhat node
@@ -239,14 +242,18 @@ Account #1: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 (10000 ETH)
 npx hardhat run scripts/deploy.js --network localhost
 ```
 
-Script tự động ghi `CONTRACT_ADDRESS` vào `.env` và `frontend/.env`.
+Script tự động ghi `CONTRACT_ADDRESS` vào `.env` và `frontend/.env`.  
+Xác nhận thấy dòng: `Contract deployed to: 0x5FbDB...`
 
-### Terminal 3 — Khởi động backend
+### Terminal 3 — Khởi động backend *(sau khi deploy xong)*
 
 ```bash
 node backend/server.js
 # Server running on port 3000
+# [blockchain] Contract ready at 0x5FbDB...
 ```
+
+> Nếu thấy `[blockchain] CONTRACT_ADDRESS is empty` thay vì `Contract ready` → chưa deploy hoặc `.env` chưa có địa chỉ. Dừng lại, chạy lại Terminal 2 trước.
 
 ### Terminal 4 — Khởi động frontend
 
