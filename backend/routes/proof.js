@@ -43,33 +43,41 @@ router.post('/verify', async (req, res) => {
       return res.status(400).json({ error: 'credentialId, proof, leaf required' });
     }
 
-    // 1. Check on-chain validity (not revoked, issuer authorized)
-    const onChain = await blockchain.verifyCredentialOnChain(credentialId);
-    if (!onChain.valid) {
-      return res.json({ valid: false, reason: 'Credential invalid or revoked on-chain' });
+    // 1. Check on-chain: not revoked + issuer authorized
+    const cred = getCredential(credentialId);
+    if (!cred) return res.status(404).json({ error: 'Credential not found' });
+
+    const [isRevoked, issuerAuthorized] = await Promise.all([
+      blockchain.isCredentialRevoked(credentialId).catch(() => false),
+      blockchain.isIssuerAuthorized(cred.issuerAddress).catch(() => false),
+    ]);
+
+    if (isRevoked) {
+      return res.json({ valid: false, reason: 'Credential has been revoked on-chain' });
+    }
+    if (!issuerAuthorized) {
+      return res.json({ valid: false, reason: 'Issuer is not authorized on-chain' });
     }
 
-    const merkleRoot = onChain.merkleRoot;
+    const merkleRoot = cred.merkleRoot;
 
-    // 2. Verify Merkle proof against on-chain root
+    // 2. Verify Merkle proof against stored root
     const merkleOk = verifyProof(proof, leaf, merkleRoot);
     if (!merkleOk) {
       return res.json({ valid: false, reason: 'Merkle proof invalid' });
     }
 
     // 3. Verify ECC signature using exact payload that was signed at issuance
-    const cred = getCredential(credentialId);
     let eccSignatureValid = false;
-    if (cred) {
+    {
       const issuer = getIssuer(cred.issuerAddress);
       if (issuer) {
-        // Reconstruct payload with the exact issuedAt that was signed
         const payload = {
           issuerAddress: cred.issuerAddress,
           studentId: cred.studentId,
           studentName: cred.studentName,
           courses: cred.courses,
-          issuedAt: cred.issuedAt,   // ← use stored issuedAt, not savedAt
+          issuedAt: cred.issuedAt,
         };
         eccSignatureValid = verifySignature(payload, cred.signature, issuer.publicKey);
       }

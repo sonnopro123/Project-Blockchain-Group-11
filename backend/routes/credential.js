@@ -61,10 +61,7 @@ router.post('/issue', async (req, res) => {
       ethers.toUtf8Bytes(`${studentId}:${issuerAddress}:${issuedAt}`)
     );
 
-    // 5. Issue on-chain — signed by issuer's Ethereum wallet (onlyAuthorizedIssuer)
-    await blockchain.issueCredentialOnChain(credentialId, merkleRoot, issuerRecord.ethPrivateKey);
-
-    // 6. Save off-chain — store issuedAt so proof/verify can reconstruct exact payload
+    // 5. Save off-chain — credential issuance is off-chain (ECC signed), contract only tracks revocation
     saveCredential(credentialId, {
       issuerAddress,
       studentId,
@@ -118,8 +115,8 @@ router.get('/:id', async (req, res) => {
     const cred = getCredential(req.params.id);
     if (!cred) return res.status(404).json({ error: 'Credential not found' });
 
-    const onChain = await blockchain.verifyCredentialOnChain(req.params.id);
-    return res.json({ ...cred, onChainValid: onChain.valid });
+    const revoked = await blockchain.isCredentialRevoked(req.params.id).catch(() => null);
+    return res.json({ ...cred, onChainRevoked: revoked ?? cred.revoked });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: err.message });

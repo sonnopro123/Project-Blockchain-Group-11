@@ -1,6 +1,13 @@
 /**
  * MODULE E — BLOCKCHAIN SERVICE
  * Connects to an Ethereum node, interacts with CredentialRegistry smart contract.
+ *
+ * Contract functions available:
+ *   addIssuer(address)            onlyOwner
+ *   removeIssuer(address)         onlyOwner
+ *   revokeCredential(bytes32)     onlyAuthorizedIssuer
+ *   isAuthorizedIssuer(address)   view
+ *   isRevoked(bytes32)            view
  */
 
 const { ethers } = require('ethers');
@@ -11,13 +18,6 @@ let provider;
 let ownerWallet;
 let contract;
 
-/**
- * Initialize provider, owner wallet, and contract instance.
- * Must be called before any other function.
- * @param {string} rpcUrl          e.g. http://127.0.0.1:8545
- * @param {string} ownerPrivateKey Owner wallet private key (used for registerIssuer only)
- * @param {string} contractAddress Deployed CredentialRegistry address
- */
 function init(rpcUrl, ownerPrivateKey, contractAddress) {
   provider = new ethers.JsonRpcProvider(rpcUrl);
   ownerWallet = new ethers.Wallet(ownerPrivateKey, provider);
@@ -28,11 +28,6 @@ function _ensureInit() {
   if (!contract) throw new Error('blockchainService not initialized. Call init() first.');
 }
 
-/**
- * Get a contract instance connected to a specific signer wallet.
- * @param {string} privateKey  Issuer's Ethereum private key
- * @returns {ethers.Contract}
- */
 function _contractAs(privateKey) {
   const signerWallet = new ethers.Wallet(privateKey, provider);
   return contract.connect(signerWallet);
@@ -44,7 +39,7 @@ function _contractAs(privateKey) {
 
 async function registerIssuerOnChain(issuerAddress) {
   _ensureInit();
-  const tx = await contract.registerIssuer(issuerAddress);
+  const tx = await contract.addIssuer(issuerAddress);
   return tx.wait();
 }
 
@@ -56,31 +51,13 @@ async function removeIssuerOnChain(issuerAddress) {
 
 async function isIssuerAuthorized(issuerAddress) {
   _ensureInit();
-  return contract.isIssuerAuthorized(issuerAddress);
+  return contract.isAuthorizedIssuer(issuerAddress);
 }
 
 // ---------------------------------------------------------------------------
-// Credential management
+// Revocation (onlyAuthorizedIssuer)
 // ---------------------------------------------------------------------------
 
-/**
- * Issue credential on-chain, signed by the issuer's own Ethereum wallet.
- * @param {string} credentialId       bytes32 hex (0x-prefixed)
- * @param {string} merkleRoot         bytes32 hex (0x-prefixed)
- * @param {string} issuerEthPrivateKey Issuer's Ethereum private key
- */
-async function issueCredentialOnChain(credentialId, merkleRoot, issuerEthPrivateKey) {
-  _ensureInit();
-  const issuerContract = _contractAs(issuerEthPrivateKey);
-  const tx = await issuerContract.issueCredential(credentialId, merkleRoot);
-  return tx.wait();
-}
-
-/**
- * Revoke credential on-chain, signed by the issuer's own Ethereum wallet.
- * @param {string} credentialId       bytes32 hex (0x-prefixed)
- * @param {string} issuerEthPrivateKey Issuer's Ethereum private key
- */
 async function revokeCredentialOnChain(credentialId, issuerEthPrivateKey) {
   _ensureInit();
   const issuerContract = _contractAs(issuerEthPrivateKey);
@@ -88,18 +65,13 @@ async function revokeCredentialOnChain(credentialId, issuerEthPrivateKey) {
   return tx.wait();
 }
 
-/**
- * @returns {{ valid: boolean, merkleRoot: string }}
- */
-async function verifyCredentialOnChain(credentialId) {
-  _ensureInit();
-  const [valid, merkleRoot] = await contract.verifyCredential(credentialId);
-  return { valid, merkleRoot };
-}
+// ---------------------------------------------------------------------------
+// Read-only helpers
+// ---------------------------------------------------------------------------
 
-async function getMerkleRootOnChain(credentialId) {
+async function isCredentialRevoked(credentialId) {
   _ensureInit();
-  return contract.getMerkleRoot(credentialId);
+  return contract.isRevoked(credentialId);
 }
 
 module.exports = {
@@ -107,8 +79,6 @@ module.exports = {
   registerIssuerOnChain,
   removeIssuerOnChain,
   isIssuerAuthorized,
-  issueCredentialOnChain,
   revokeCredentialOnChain,
-  verifyCredentialOnChain,
-  getMerkleRootOnChain,
+  isCredentialRevoked,
 };
