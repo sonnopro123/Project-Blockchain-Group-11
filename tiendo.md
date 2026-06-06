@@ -1,7 +1,7 @@
 # Tiến độ dự án — CredProof
 ### Decentralized Academic Credential Verification
 
-Cập nhật lần cuối: 2026-06-05
+Cập nhật lần cuối: 2026-06-06
 
 ---
 
@@ -9,15 +9,15 @@ Cập nhật lần cuối: 2026-06-05
 
 | Hạng mục | Trạng thái | Ghi chú |
 |----------|-----------|---------|
-| Smart Contract | ✅ Hoàn thành | Rewritten: addIssuer/removeIssuer/revokeCredential, 20 test pass |
+| Smart Contract | ✅ Hoàn thành | revokeCredential enforce on-chain issueCredential trước — 27 test pass |
 | ECC Engine | ✅ Hoàn thành | MetaMask EIP-191 personal sign (frontend), no backend keys |
 | Merkle Engine | ✅ Hoàn thành | Frontend pure ethers.js — sortPairs=true |
-| Backend API | ✅ Legacy (backend) | Không dùng cho luồng chính — MetaMask flow là frontend-only |
+| Backend API | ✅ Cache layer | /credential/issue nhận credential đã ký từ frontend (không còn server-side ECC) |
 | Blockchain Service | ✅ Hoàn thành | Frontend services: wallet.js, contract.js |
-| End-to-End Test | ✅ Contract test 20/20 | test/CredentialRegistry.test.js |
-| Frontend Sprint 1 | ✅ Hoàn thành | Landing + AdminDashboard + IssuerDashboard |
+| End-to-End Test | ✅ Contract test 27/27 + Unit 9/9 | test:contract + test:unit pass |
+| Frontend Sprint 1 | ✅ Hoàn thành | Landing + AdminDashboard + IssuerDashboard (2-popup: sign + issueCredential) |
 | Frontend Sprint 2 | ✅ Hoàn thành | StudentDashboard + VerifierDashboard |
-| Refactor MetaMask | ✅ Hoàn thành | 2026-06-05 — xem LỊCH SỬ |
+| Refactor Unified Flow | ✅ Hoàn thành | 2026-06-06 — loại bỏ server-side ECC, backend là cache layer |
 | Bug Fix: CORS + eccPrivateKey | ✅ Hoàn thành | 2026-05-31 — xem LỊCH SỬ |
 
 ---
@@ -35,7 +35,7 @@ Cập nhật lần cuối: 2026-06-05
 - `isAuthorizedIssuer(address)`, `isRevoked(bytes32)`, `owner()`
 - Events: `IssuerAdded`, `IssuerRemoved`, `CredentialRevoked`
 
-Test: `test/CredentialRegistry.test.js` — 20 case, all pass
+Test: `test/CredentialRegistry.test.js` — 27 case, all pass
 
 ---
 
@@ -184,3 +184,4 @@ Stack: React 18 + Vite 5 + TailwindCSS + ethers.js v6
 | 2026-05-11 | Remove claude.md khỏi git tracking; cập nhật .gitignore |
 | 2026-05-31 | Fix CORS, eccPrivateKey storage, deploy script auto-write, frontend cleanup, e2e test update |
 | 2026-06-05 | Refactor toàn bộ: contract mới (addIssuer/revokeCredential), MetaMask signing, AdminDashboard, frontend services (wallet/contract/merkle/credential), build pass 206 modules |
+| 2026-06-06 | Unified flow: revokeCredential enforce on-chain issuance (27 test pass), backend /credential/issue thành cache endpoint (MetaMask sig validation), IssuerDashboard 2-popup, /proof/verify dùng credentialHash + ethers.verifyMessage, build pass 208 modules |
