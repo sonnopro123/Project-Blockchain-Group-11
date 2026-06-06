@@ -22,6 +22,11 @@ export async function removeIssuer(signer, issuerAddress) {
   return tx.wait()
 }
 
+export async function issueCredential(signer, credentialHash) {
+  const tx = await getContract(signer).issueCredential(credentialHash)
+  return tx.wait()
+}
+
 export async function revokeCredential(signer, credentialHash) {
   const tx = await getContract(signer).revokeCredential(credentialHash)
   return tx.wait()

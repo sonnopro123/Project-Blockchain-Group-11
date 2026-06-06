@@ -10,7 +10,7 @@ describe('CredentialRegistry', function () {
   let registry;
   let owner, issuer1, issuer2, other;
 
-  const CRED_HASH = ethers.keccak256(ethers.toUtf8Bytes('test-credential-hash'));
+  const CRED_HASH   = ethers.keccak256(ethers.toUtf8Bytes('test-credential-hash'));
   const CRED_HASH_2 = ethers.keccak256(ethers.toUtf8Bytes('test-credential-hash-2'));
 
   beforeEach(async function () {
@@ -91,14 +91,55 @@ describe('CredentialRegistry', function () {
   });
 
   // -------------------------------------------------------------------------
+  // issueCredential
+  // -------------------------------------------------------------------------
+  describe('issueCredential', function () {
+    beforeEach(async function () {
+      await registry.addIssuer(issuer1.address);
+    });
+
+    it('authorized issuer can issue a credential', async function () {
+      await registry.connect(issuer1).issueCredential(CRED_HASH);
+      expect(await registry.credentialIssuers(CRED_HASH)).to.equal(issuer1.address);
+    });
+
+    it('emits CredentialIssued', async function () {
+      await expect(registry.connect(issuer1).issueCredential(CRED_HASH))
+        .to.emit(registry, 'CredentialIssued')
+        .withArgs(CRED_HASH, issuer1.address);
+    });
+
+    it('non-issuer cannot issue', async function () {
+      await expect(registry.connect(other).issueCredential(CRED_HASH))
+        .to.be.revertedWith('Not authorized issuer');
+    });
+
+    it('cannot issue same credential hash twice', async function () {
+      await registry.connect(issuer1).issueCredential(CRED_HASH);
+      await expect(registry.connect(issuer1).issueCredential(CRED_HASH))
+        .to.be.revertedWith('Already issued');
+    });
+
+    it('two issuers can issue different credentials', async function () {
+      await registry.addIssuer(issuer2.address);
+      await registry.connect(issuer1).issueCredential(CRED_HASH);
+      await registry.connect(issuer2).issueCredential(CRED_HASH_2);
+      expect(await registry.credentialIssuers(CRED_HASH)).to.equal(issuer1.address);
+      expect(await registry.credentialIssuers(CRED_HASH_2)).to.equal(issuer2.address);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // revokeCredential
   // -------------------------------------------------------------------------
   describe('revokeCredential', function () {
     beforeEach(async function () {
       await registry.addIssuer(issuer1.address);
+      // issuer1 must issue before they can revoke
+      await registry.connect(issuer1).issueCredential(CRED_HASH);
     });
 
-    it('authorized issuer can revoke credential', async function () {
+    it('issuing issuer can revoke their credential', async function () {
       await registry.connect(issuer1).revokeCredential(CRED_HASH);
       expect(await registry.isRevoked(CRED_HASH)).to.be.true;
     });
@@ -119,6 +160,18 @@ describe('CredentialRegistry', function () {
         .to.be.revertedWith('Not authorized issuer');
     });
 
+    it('different authorized issuer CANNOT revoke another issuer\'s credential', async function () {
+      await registry.addIssuer(issuer2.address);
+      await expect(registry.connect(issuer2).revokeCredential(CRED_HASH))
+        .to.be.revertedWith('Only issuing issuer can revoke');
+    });
+
+    it('cannot revoke without issuing first', async function () {
+      const UNISSUED = ethers.keccak256(ethers.toUtf8Bytes('never-issued'));
+      await expect(registry.connect(issuer1).revokeCredential(UNISSUED))
+        .to.be.revertedWith('Only issuing issuer can revoke');
+    });
+
     it('cannot revoke same credential twice', async function () {
       await registry.connect(issuer1).revokeCredential(CRED_HASH);
       await expect(registry.connect(issuer1).revokeCredential(CRED_HASH))
@@ -131,15 +184,14 @@ describe('CredentialRegistry', function () {
         .to.be.revertedWith('Not authorized issuer');
     });
 
-    it('different credentials can be revoked independently', async function () {
-      await registry.connect(issuer1).revokeCredential(CRED_HASH);
-      expect(await registry.isRevoked(CRED_HASH)).to.be.true;
-      expect(await registry.isRevoked(CRED_HASH_2)).to.be.false;
-    });
-
-    it('second issuer can also revoke credentials', async function () {
+    it('each issuer can only revoke their own credentials', async function () {
       await registry.addIssuer(issuer2.address);
+      await registry.connect(issuer2).issueCredential(CRED_HASH_2);
+
+      await registry.connect(issuer1).revokeCredential(CRED_HASH);
       await registry.connect(issuer2).revokeCredential(CRED_HASH_2);
+
+      expect(await registry.isRevoked(CRED_HASH)).to.be.true;
       expect(await registry.isRevoked(CRED_HASH_2)).to.be.true;
     });
   });
@@ -154,6 +206,10 @@ describe('CredentialRegistry', function () {
 
     it('isRevoked returns false for unknown hash', async function () {
       expect(await registry.isRevoked(CRED_HASH)).to.be.false;
+    });
+
+    it('credentialIssuers returns zero address for unissued hash', async function () {
+      expect(await registry.credentialIssuers(CRED_HASH)).to.equal(ethers.ZeroAddress);
     });
   });
 });
