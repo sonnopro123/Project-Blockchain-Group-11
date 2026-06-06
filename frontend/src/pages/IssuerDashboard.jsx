@@ -86,7 +86,7 @@ function ConnectTab({ wallet, authorized, onConnected }) {
 }
 
 // ── Tab 2: Issue ──────────────────────────────────────────────────────────────
-function IssueTab({ wallet }) {
+function IssueTab({ wallet, authorized }) {
   const toast = useToast()
   const resultRef = useRef(null)
 
@@ -139,6 +139,14 @@ function IssueTab({ wallet }) {
     const errs = validate()
     if (Object.keys(errs).length) { setErrors(errs); return }
     setErrors({})
+
+    // Double-check on-chain authorization right before signing
+    const stillAuthorized = await isAuthorizedIssuer(wallet.provider, wallet.address).catch(() => false)
+    if (!stillAuthorized) {
+      toast.error(`Ví ${wallet.address.slice(0,10)}... chưa được ủy quyền làm Issuer. Nhờ Admin thêm vào contract trước.`)
+      return
+    }
+
     setLoading(true)
     try {
       const filled = courses.filter(c => c.courseCode && c.grade)
@@ -203,6 +211,18 @@ function IssueTab({ wallet }) {
   if (!wallet) {
     return (
       <Card><p className="text-yellow-400 text-sm">⚠ Kết nối ví Issuer trước ở tab "Kết nối ví".</p></Card>
+    )
+  }
+
+  if (!authorized) {
+    return (
+      <Card>
+        <p className="text-yellow-400 text-sm font-semibold mb-1">⚠ Ví này chưa được Admin ủy quyền làm Issuer.</p>
+        <p className="text-[#555] text-xs leading-relaxed">
+          Địa chỉ hiện tại: <span className="font-mono text-[#888]">{wallet.address}</span><br/>
+          Nhờ Admin vào tab Admin → Quản lý Issuer → Thêm địa chỉ này vào danh sách Authorized Issuer.
+        </p>
+      </Card>
     )
   }
 
@@ -335,7 +355,7 @@ function IssueTab({ wallet }) {
 }
 
 // ── Tab 3: Revoke ─────────────────────────────────────────────────────────────
-function RevokeTab({ wallet }) {
+function RevokeTab({ wallet, authorized }) {
   const toast = useToast()
   const [credHash, setCredHash] = useState(() => {
     // Pre-fill from last issued credential
@@ -365,6 +385,15 @@ function RevokeTab({ wallet }) {
 
   if (!wallet) {
     return <Card><p className="text-yellow-400 text-sm">⚠ Kết nối ví Issuer trước.</p></Card>
+  }
+
+  if (!authorized) {
+    return (
+      <Card>
+        <p className="text-yellow-400 text-sm font-semibold mb-1">⚠ Ví này chưa được Admin ủy quyền làm Issuer.</p>
+        <p className="text-[#555] text-xs">Chỉ Authorized Issuer mới có thể thu hồi văn bằng trên blockchain.</p>
+      </Card>
+    )
   }
 
   return (
@@ -460,8 +489,8 @@ export default function IssuerDashboard() {
           onConnected={auth => { setAuthorized(auth); if (auth) setTab('issue') }}
         />
       )}
-      {tab === 'issue'  && <IssueTab wallet={wallet} />}
-      {tab === 'revoke' && <RevokeTab wallet={wallet} />}
+      {tab === 'issue'  && <IssueTab wallet={wallet} authorized={authorized} />}
+      {tab === 'revoke' && <RevokeTab wallet={wallet} authorized={authorized} />}
     </DashboardLayout>
   )
 }
