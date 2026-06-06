@@ -170,13 +170,9 @@ function IssueTab({ wallet, authorized }) {
 
       const credentialHash = computeCredentialHash(base)
 
-      // MetaMask popup 1 — issuer signs credential hash (EIP-191 personal sign)
-      toast.info('MetaMask: Popup 1/2 — ký văn bằng...')
+      // MetaMask popup — issuer signs credential hash (EIP-191 personal_sign, no gas)
+      toast.info('MetaMask sẽ hiện popup để ký văn bằng...')
       const issuerSignature = await signCredential(wallet.signer, credentialHash)
-
-      // MetaMask popup 2 — register credential on-chain so only this issuer can revoke it
-      toast.info('MetaMask: Popup 2/2 — đăng ký lên blockchain...')
-      await issueCredential(wallet.signer, credentialHash)
 
       const credential = {
         schemaVersion: '1.0',
@@ -188,7 +184,7 @@ function IssueTab({ wallet, authorized }) {
 
       localStorage.setItem('credproof_last_credential', JSON.stringify(credential))
       setResult(credential)
-      toast.success('Văn bằng đã ký và đăng ký on-chain thành công!')
+      toast.success('Văn bằng đã được ký thành công!')
     } catch (e) {
       toast.error(walletError(e))
     } finally {
