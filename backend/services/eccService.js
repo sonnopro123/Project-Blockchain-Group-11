@@ -60,9 +60,21 @@ function verifySignature(credentialPayload, signature, publicKeyHex) {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+// Recursive deterministic serialization — sorts object keys at every nesting level
+// so hash is stable regardless of the key order the caller used when constructing the object.
+function _sortedStringify(value) {
+  if (Array.isArray(value)) {
+    return '[' + value.map(_sortedStringify).join(',') + ']';
+  }
+  if (value !== null && typeof value === 'object') {
+    const keys = Object.keys(value).sort();
+    return '{' + keys.map((k) => JSON.stringify(k) + ':' + _sortedStringify(value[k])).join(',') + '}';
+  }
+  return JSON.stringify(value);
+}
+
 function _hashPayload(payload) {
-  const json = JSON.stringify(payload, Object.keys(payload).sort());
-  return keccak256(json);
+  return keccak256(_sortedStringify(payload));
 }
 
 module.exports = { generateIssuerKeyPair, signCredential, verifySignature };

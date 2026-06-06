@@ -30,8 +30,8 @@ router.post('/generate', async (req, res) => {
 
     return res.json({ credentialId, ...proofData });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: err.message });
+    console.error('[/proof/generate]', err);
+    return res.status(500).json({ error: 'Failed to generate proof' });
   }
 });
 
@@ -47,13 +47,15 @@ router.post('/verify', async (req, res) => {
     const cred = getCredential(credentialId);
     if (!cred) return res.status(404).json({ error: 'Credential not found' });
 
-    const [isRevoked, issuerAuthorized] = await Promise.all([
-      blockchain.isCredentialRevoked(credentialId).catch(() => false),
+    const [onChainRevoked, issuerAuthorized] = await Promise.all([
+      blockchain.isCredentialRevoked(credentialId).catch(() => null),
       blockchain.isIssuerAuthorized(cred.issuerAddress).catch(() => false),
     ]);
 
-    if (isRevoked) {
-      return res.json({ valid: false, reason: 'Credential has been revoked on-chain' });
+    // Treat as revoked if flagged either on-chain OR in local DB
+    const effectivelyRevoked = onChainRevoked === true || cred.revoked === true;
+    if (effectivelyRevoked) {
+      return res.json({ valid: false, reason: 'Credential has been revoked' });
     }
     if (!issuerAuthorized) {
       return res.json({ valid: false, reason: 'Issuer is not authorized on-chain' });
@@ -91,8 +93,8 @@ router.post('/verify', async (req, res) => {
       grade,
     });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: err.message });
+    console.error('[/proof/verify]', err);
+    return res.status(500).json({ error: 'Failed to verify proof' });
   }
 });
 

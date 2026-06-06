@@ -4,14 +4,16 @@
  * Request body:
  *   {
  *     "name": "Hanoi University of Science and Technology",
- *     "ethAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",   // Hardhat account address
- *     "ethPrivateKey": "0xac0974bec39..."                              // Hardhat account private key
+ *     "ethAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
  *   }
  *
  * Flow:
  *   1. Generate ECC key pair (off-chain signing)
- *   2. Register issuer on-chain via owner wallet (registerIssuer is onlyOwner)
- *   3. Store issuer off-chain (ECC keys + Ethereum keys)
+ *   2. Register issuer on-chain via owner wallet (addIssuer is onlyOwner)
+ *   3. Store issuer off-chain (ECC keys only — no Ethereum private keys stored)
+ *
+ * Note: On-chain revocation is signed by the issuer via MetaMask in the web UI.
+ *       The backend does NOT hold any Ethereum private keys for issuers.
  */
 
 const express = require('express');
@@ -22,13 +24,17 @@ const blockchain = require('../blockchain/blockchainService');
 
 router.post('/register', async (req, res) => {
   try {
-    const { name, ethAddress, ethPrivateKey } = req.body;
+    const { name, ethAddress } = req.body;
 
-    if (!name || !ethAddress || !ethPrivateKey) {
+    if (!name || !ethAddress) {
       return res.status(400).json({
-        error: 'name, ethAddress, and ethPrivateKey are required',
-        hint: 'Use a Hardhat test account address and private key',
+        error: 'name and ethAddress are required',
       });
+    }
+
+    // Basic Ethereum address format check
+    if (!/^0x[0-9a-fA-F]{40}$/.test(ethAddress)) {
+      return res.status(400).json({ error: 'Invalid Ethereum address format' });
     }
 
     if (getIssuer(ethAddress)) {
@@ -38,16 +44,16 @@ router.post('/register', async (req, res) => {
     // 1. Generate ECC key pair for off-chain credential signing
     const { privateKey: eccPrivateKey, publicKey: eccPublicKey } = generateIssuerKeyPair();
 
-    // 2. Register issuer on-chain (owner wallet pays gas, registerIssuer is onlyOwner)
+    // 2. Register issuer on-chain (owner wallet pays gas, addIssuer is onlyOwner)
     await blockchain.registerIssuerOnChain(ethAddress);
 
-    // 3. Store off-chain (including ECC private key so backend can sign without client re-sending it)
+    // 3. Store off-chain — ECC private key stored to sign credentials server-side
+    //    No Ethereum private keys are stored; on-chain actions use MetaMask in the UI
     saveIssuer(ethAddress, {
       name,
       publicKey: eccPublicKey,
       eccPrivateKey,
       ethAddress,
-      ethPrivateKey,
     });
 
     return res.status(201).json({
@@ -56,13 +62,12 @@ router.post('/register', async (req, res) => {
         ethAddress,
         name,
         eccPublicKey,
-        // Return ECC private key once — issuer must store this for signing credentials
         eccPrivateKey,
       },
     });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: err.message });
+    console.error('[/issuer/register]', err);
+    return res.status(500).json({ error: 'Failed to register issuer' });
   }
 });
 

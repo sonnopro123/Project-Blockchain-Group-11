@@ -25,9 +25,9 @@ function _save(data) {
 
 /**
  * @param {string} address
- * @param {{ name: string, publicKey: string, eccPrivateKey: string, ethAddress: string, ethPrivateKey: string }} info
+ * @param {{ name: string, publicKey: string, eccPrivateKey: string, ethAddress: string }} info
  */
-function saveIssuer(address, { name, publicKey, eccPrivateKey, ethAddress, ethPrivateKey }) {
+function saveIssuer(address, { name, publicKey, eccPrivateKey, ethAddress }) {
   const db = _load();
   db.issuers[address] = {
     address,
@@ -35,7 +35,7 @@ function saveIssuer(address, { name, publicKey, eccPrivateKey, ethAddress, ethPr
     publicKey,
     eccPrivateKey,   // ECC key — used to sign credentials off-chain
     ethAddress,
-    ethPrivateKey,   // Hardhat test account key — used to sign on-chain txs as issuer
+    // No Ethereum private key stored — on-chain actions use MetaMask in the UI
     registeredAt: new Date().toISOString(),
   };
   _save(db);
