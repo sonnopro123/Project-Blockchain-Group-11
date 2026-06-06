@@ -23,12 +23,13 @@ export async function removeIssuer(signer, issuerAddress) {
 }
 
 export async function issueCredential(signer, credentialHash) {
-  const tx = await getContract(signer).issueCredential(credentialHash)
+  // Explicit gasLimit bypasses ethers.js auto-estimateGas so MetaMask popup always shows
+  const tx = await getContract(signer).issueCredential(credentialHash, { gasLimit: 150000 })
   return tx.wait()
 }
 
 export async function revokeCredential(signer, credentialHash) {
-  const tx = await getContract(signer).revokeCredential(credentialHash)
+  const tx = await getContract(signer).revokeCredential(credentialHash, { gasLimit: 150000 })
   return tx.wait()
 }
 

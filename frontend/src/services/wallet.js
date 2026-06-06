@@ -41,9 +41,10 @@ export function walletError(err) {
     return 'Mạng đã thay đổi. Hãy làm mới trang.'
   }
   if (msg.includes('insufficient funds')) return 'Không đủ ETH để trả phí gas.'
-  // Hardhat returns data="0x" / reason="require(false)" when sender has 0 ETH
-  if ((msg.includes('data="0x"') || msg.includes("data='0x'") || msg.includes('require(false)')) && !msg.includes('user rejected')) {
-    return 'Giao dịch thất bại — ví có thể không đủ ETH để trả gas, hoặc contract revert (kiểm tra console để biết thêm).'
-  }
+  if (msg.includes('Credential not issued')) return 'Credential này chưa được đăng ký on-chain. Hãy phát hành lại văn bằng (bước 2/2 đăng ký on-chain) trước khi thu hồi.'
+  if (msg.includes('Already issued')) return 'Credential hash này đã được đăng ký on-chain trước đó.'
+  if (msg.includes('Already revoked')) return 'Credential này đã bị thu hồi trước đó.'
+  if (msg.includes('Only issuing issuer')) return 'Chỉ issuer đã cấp văn bằng này mới được thu hồi.'
+  if (msg.includes('Not authorized issuer')) return 'Ví này chưa được Admin ủy quyền làm Issuer.'
   return msg.length > 120 ? msg.slice(0, 120) + '...' : msg
 }
