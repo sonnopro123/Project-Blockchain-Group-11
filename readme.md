@@ -192,8 +192,8 @@ Selective Disclosure: proof của L0 = [L1, H(L2,L2)]
 ### 1. Clone & cài dependencies
 
 ```bash
-git clone https://github.com/sonnopro123/Capstone-Project-Blockchain-Group-11.git
-cd Capstone-Project-Blockchain-Group-11
+git clone https://github.com/sonnopro123/Project-Blockchain-Group-11.git
+cd Project-Blockchain-Group-11
 
 # Dependencies gốc (Hardhat, backend)
 npm install
