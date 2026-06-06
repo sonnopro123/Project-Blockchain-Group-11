@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { APP_NAME, APP_ABBR } from '../config/branding'
+import { useWallet } from '../contexts/WalletContext'
 
 const links = [
   { to: '/',         label: 'Trang chủ' },
@@ -10,9 +11,12 @@ const links = [
   { to: '/verifier', label: 'Xác minh' },
 ]
 
+function short(addr) { return addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '' }
+
 export default function Navbar() {
   const { pathname } = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
+  const { wallet, connect, connecting } = useWallet()
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-[#1a1a1a] bg-[#0a0a0a]/80 backdrop-blur-md">
@@ -44,12 +48,26 @@ export default function Navbar() {
 
         {/* Right side */}
         <div className="flex items-center gap-3">
-          <Link
-            to="/issuer"
-            className="hidden md:block bg-[#6c47ff] hover:bg-[#7c5aff] text-white text-sm px-4 py-1.5 rounded-full transition-colors"
-          >
-            Bắt đầu
-          </Link>
+          {wallet ? (
+            <button
+              onClick={connect}
+              disabled={connecting}
+              className="hidden md:flex items-center gap-2 border border-[#2a2a2a] hover:border-[#6c47ff]/40 bg-[#111] rounded-full px-3 py-1.5 transition-colors"
+              title="Bấm để đổi ví"
+            >
+              <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
+              <span className="text-xs font-mono text-[#aaa]">{short(wallet.address)}</span>
+              <span className="text-xs text-[#555]">↕</span>
+            </button>
+          ) : (
+            <button
+              onClick={connect}
+              disabled={connecting}
+              className="hidden md:block border border-[#333] hover:border-[#555] text-[#888] hover:text-white text-xs px-3 py-1.5 rounded-full transition-colors"
+            >
+              {connecting ? '...' : '🦊 Kết nối ví'}
+            </button>
+          )}
 
           {/* Hamburger mobile */}
           <button

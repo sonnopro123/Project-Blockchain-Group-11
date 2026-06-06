@@ -5,7 +5,9 @@ import Button from '../components/Button'
 import Badge from '../components/Badge'
 import CopyField from '../components/CopyField'
 import { useToast } from '../components/Toast'
-import { connectWallet, walletError, getReadProvider } from '../services/wallet'
+import { walletError, getReadProvider } from '../services/wallet'
+import { useWallet } from '../contexts/WalletContext'
+import ConnectButton from '../components/ConnectButton'
 import { isAuthorizedIssuer, isRevoked, CONTRACT_ADDRESS } from '../services/contract'
 import {
   validateCredentialSchema, validateCredentialOffChain,
@@ -38,30 +40,20 @@ function short(addr) { return addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` :
 export default function StudentDashboard() {
   const toast = useToast()
   const fileRef = useRef(null)
+  const { wallet } = useWallet()
 
   const [tab, setTab] = useState('upload')
-  const [wallet, setWallet] = useState(null)
-  const [credential, setCredential] = useState(null)     // parsed JSON
-  const [validation, setValidation] = useState(null)     // validation results
+  const [credential, setCredential] = useState(null)
+  const [validation, setValidation] = useState(null)
   const [validating, setValidating] = useState(false)
-  const [connecting, setConnecting] = useState(false)
 
   // Proof tab
   const [selectedCourses, setSelectedCourses] = useState([])
   const [proofResult, setProofResult] = useState(null)
 
   // ── Wallet ───────────────────────────────────────────────────────────────
-  const handleConnect = async () => {
-    setConnecting(true)
-    try {
-      const w = await connectWallet()
-      setWallet(w)
-      toast.success(`Kết nối ví: ${short(w.address)}`)
-    } catch (e) {
-      toast.error(walletError(e))
-    } finally {
-      setConnecting(false)
-    }
+  const handleConnected = (w) => {
+    toast.success(`Kết nối ví: ${short(w.address)}`)
   }
 
   // ── File upload ──────────────────────────────────────────────────────────
@@ -180,13 +172,9 @@ export default function StudentDashboard() {
           <Card>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-base font-semibold text-white">Ví sinh viên</h2>
-              {wallet
-                ? <Badge variant="green">{short(wallet.address)}</Badge>
-                : <Button size="sm" onClick={handleConnect} disabled={connecting}>
-                    {connecting ? '...' : '🦊 Kết nối MetaMask'}
-                  </Button>
-              }
+              {wallet && <Badge variant="green">{short(wallet.address)}</Badge>}
             </div>
+            {!wallet && <ConnectButton onConnected={handleConnected} className="mb-3" />}
             <p className="text-xs text-[#555]">
               Ví của bạn phải khớp với địa chỉ <span className="text-white">studentWallet</span> trong credential để xác nhận quyền sở hữu.
             </p>

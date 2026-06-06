@@ -40,3 +40,33 @@ export async function isRevoked(provider, credentialHash) {
 export async function getOwner(provider) {
   return getContract(provider).owner()
 }
+
+// Returns list of currently authorized issuers by replaying events in chronological order
+export async function getAuthorizedIssuers(provider) {
+  const contract = getContract(provider)
+  const [added, removed] = await Promise.all([
+    contract.queryFilter(contract.filters.IssuerAdded()),
+    contract.queryFilter(contract.filters.IssuerRemoved()),
+  ])
+
+  // Merge and sort by block + log index to get correct timeline
+  const events = [
+    ...added.map(e => ({ type: 'add', addr: e.args[0], block: e.blockNumber, idx: e.index ?? e.logIndex ?? 0 })),
+    ...removed.map(e => ({ type: 'remove', addr: e.args[0], block: e.blockNumber, idx: e.index ?? e.logIndex ?? 0 })),
+  ].sort((a, b) => a.block - b.block || a.idx - b.idx)
+
+  // Replay events in order — handles re-add after remove correctly
+  const authorized = new Set()
+  const originalCase = {}
+  for (const e of events) {
+    const key = e.addr.toLowerCase()
+    if (e.type === 'add') {
+      authorized.add(key)
+      originalCase[key] = e.addr
+    } else {
+      authorized.delete(key)
+    }
+  }
+
+  return [...authorized].map(key => originalCase[key])
+}

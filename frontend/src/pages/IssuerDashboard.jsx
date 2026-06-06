@@ -9,13 +9,15 @@ import CourseInput from '../components/CourseInput'
 import WorkflowStepper from '../components/WorkflowStepper'
 import Tooltip from '../components/Tooltip'
 import { useToast } from '../components/Toast'
-import { connectWallet, walletError, getReadProvider } from '../services/wallet'
+import { walletError } from '../services/wallet'
 import { isAuthorizedIssuer, revokeCredential, CONTRACT_ADDRESS } from '../services/contract'
 import {
   computeCredentialId, computeCredentialHash, signCredential,
 } from '../services/credential'
 import { generateRoot as merkleRoot } from '../services/merkle'
 import { downloadJSON } from '../utils/download'
+import { useWallet } from '../contexts/WalletContext'
+import ConnectButton from '../components/ConnectButton'
 
 const TABS = [
   { id: 'connect', label: 'Kết nối ví' },
@@ -27,25 +29,20 @@ const WORKFLOW = ['Kết nối ví', 'Phát hành', 'Thu hồi (nếu cần)']
 function short(addr) { return addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '' }
 
 // ── Tab 1: Connect ────────────────────────────────────────────────────────────
-function ConnectTab({ wallet, onConnected }) {
+function ConnectTab({ wallet, authorized, onConnected }) {
   const toast = useToast()
-  const [connecting, setConnecting] = useState(false)
 
-  const handle = async () => {
-    setConnecting(true)
+  const handleConnected = async (w) => {
     try {
-      const w = await connectWallet()
-      const authorized = await isAuthorizedIssuer(w.provider, w.address)
-      onConnected({ ...w, authorized })
-      if (authorized) {
+      const auth = await isAuthorizedIssuer(w.provider, w.address)
+      onConnected(auth)
+      if (auth) {
         toast.success('Đã kết nối! Ví này là Authorized Issuer.')
       } else {
         toast.info('Kết nối thành công. Ví này chưa được Admin ủy quyền làm Issuer.')
       }
     } catch (e) {
       toast.error(walletError(e))
-    } finally {
-      setConnecting(false)
     }
   }
 
@@ -65,24 +62,23 @@ function ConnectTab({ wallet, onConnected }) {
         </div>
         {wallet ? (
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Badge variant={wallet.authorized ? 'green' : 'yellow'}>
-                {wallet.authorized ? 'Authorized Issuer' : 'Chưa được ủy quyền'}
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant={authorized ? 'green' : 'yellow'}>
+                {authorized ? 'Authorized Issuer' : 'Chưa được ủy quyền'}
               </Badge>
               <span className="font-mono text-sm text-[#aaa]">{short(wallet.address)}</span>
               <span className="text-xs text-[#555]">Chain {wallet.chainId}</span>
             </div>
-            {!wallet.authorized && (
+            {!authorized && (
               <p className="text-xs text-yellow-500">⚠ Nhờ Admin chạy addIssuer({short(wallet.address)}) trước khi phát hành.</p>
             )}
-            {wallet.authorized && (
+            {authorized && (
               <p className="text-xs text-[#6c47ff]">✓ Có thể phát hành văn bằng — chuyển sang tab "Phát hành văn bằng"</p>
             )}
+            <ConnectButton onConnected={handleConnected} label="🔄 Đổi ví Issuer" />
           </div>
         ) : (
-          <Button onClick={handle} disabled={connecting} className="w-full">
-            {connecting ? 'Đang kết nối...' : '🦊 Kết nối MetaMask'}
-          </Button>
+          <ConnectButton onConnected={handleConnected} />
         )}
       </Card>
     </div>
@@ -103,7 +99,13 @@ function IssueTab({ wallet }) {
   const [courses, setCourses] = useState([{ courseCode: '', courseName: '', grade: '' }])
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState(null)
+  const [result, setResult] = useState(() => {
+    // Restore last issued credential from localStorage on mount
+    try {
+      const saved = localStorage.getItem('credproof_last_credential')
+      return saved ? JSON.parse(saved) : null
+    } catch { return null }
+  })
 
   useEffect(() => {
     if (result && resultRef.current) {
@@ -172,6 +174,7 @@ function IssueTab({ wallet }) {
       }
       delete credential._meta
 
+      localStorage.setItem('credproof_last_credential', JSON.stringify(credential))
       setResult(credential)
       toast.success('Văn bằng đã được ký thành công!')
     } catch (e) {
@@ -185,6 +188,12 @@ function IssueTab({ wallet }) {
     if (!result) return
     downloadJSON(result, `credential-${result.studentId}-${Date.now()}.json`)
     toast.success('Đã tải xuống credential JSON')
+  }
+
+  const handleClear = () => {
+    localStorage.removeItem('credproof_last_credential')
+    setResult(null)
+    toast.info('Đã xóa. Có thể phát hành văn bằng mới.')
   }
 
   if (!wallet) {
@@ -303,10 +312,16 @@ function IssueTab({ wallet }) {
               <CopyField label="Chữ ký Issuer (ECC / MetaMask)" value={result.issuerSignature} />
             </div>
 
-            <div className="mt-4 pt-4 border-t border-[#1a1a1a]">
-              <Button onClick={handleDownload} className="w-full">
-                ⬇ Tải credential.json (giao cho sinh viên)
+            <div className="mt-4 pt-4 border-t border-[#1a1a1a] flex gap-3">
+              <Button onClick={handleDownload} className="flex-1">
+                ⬇ Tải credential.json
               </Button>
+              <button
+                onClick={handleClear}
+                className="text-xs text-[#555] hover:text-red-400 border border-[#222] hover:border-red-500/30 px-4 rounded-xl transition-colors"
+              >
+                Phát hành mới
+              </button>
             </div>
           </Card>
         </div>
@@ -318,7 +333,13 @@ function IssueTab({ wallet }) {
 // ── Tab 3: Revoke ─────────────────────────────────────────────────────────────
 function RevokeTab({ wallet }) {
   const toast = useToast()
-  const [credHash, setCredHash] = useState('')
+  const [credHash, setCredHash] = useState(() => {
+    // Pre-fill from last issued credential
+    try {
+      const saved = localStorage.getItem('credproof_last_credential')
+      return saved ? JSON.parse(saved).credentialHash || '' : ''
+    } catch { return '' }
+  })
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
 
@@ -391,8 +412,17 @@ function InfoRow({ label, value }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function IssuerDashboard() {
+  const { wallet } = useWallet()
   const [tab, setTab] = useState('connect')
-  const [wallet, setWallet] = useState(null)
+  const [authorized, setAuthorized] = useState(false)
+
+  // Re-check authorized whenever wallet changes (e.g. user switches account)
+  useEffect(() => {
+    if (!wallet) { setAuthorized(false); return }
+    isAuthorizedIssuer(wallet.provider, wallet.address)
+      .then(setAuthorized)
+      .catch(() => setAuthorized(false))
+  }, [wallet?.address, wallet?.chainId])
 
   const activeStep = tab === 'connect' ? 0 : tab === 'issue' ? 1 : 2
   const completedSteps = [wallet ? 0 : null].filter(s => s !== null)
@@ -419,9 +449,15 @@ export default function IssuerDashboard() {
         ))}
       </div>
 
-      {tab === 'connect' && <ConnectTab wallet={wallet} onConnected={w => { setWallet(w); setTab('issue') }} />}
-      {tab === 'issue'   && <IssueTab wallet={wallet} />}
-      {tab === 'revoke'  && <RevokeTab wallet={wallet} />}
+      {tab === 'connect' && (
+        <ConnectTab
+          wallet={wallet}
+          authorized={authorized}
+          onConnected={auth => { setAuthorized(auth); if (auth) setTab('issue') }}
+        />
+      )}
+      {tab === 'issue'  && <IssueTab wallet={wallet} />}
+      {tab === 'revoke' && <RevokeTab wallet={wallet} />}
     </DashboardLayout>
   )
 }

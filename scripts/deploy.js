@@ -21,23 +21,35 @@ async function main() {
   console.log('\n✅ Contract deployed to:', address);
   console.log('📋 Copy address trên vào file .env: CONTRACT_ADDRESS=' + address + '\n');
 
-  // Auto-write CONTRACT_ADDRESS into .env if the file exists
-  const envPath = path.join(__dirname, '..', '.env');
-  if (fs.existsSync(envPath)) {
-    let envContent = fs.readFileSync(envPath, 'utf8');
-    if (/^CONTRACT_ADDRESS=.*/m.test(envContent)) {
-      envContent = envContent.replace(/^CONTRACT_ADDRESS=.*/m, `CONTRACT_ADDRESS=${address}`);
+  // Helper: upsert a key=value line in an env file
+  function upsertEnv(filePath, key, value) {
+    let content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '';
+    const regex = new RegExp(`^${key}=.*`, 'm');
+    if (regex.test(content)) {
+      content = content.replace(regex, `${key}=${value}`);
     } else {
-      envContent += `\nCONTRACT_ADDRESS=${address}`;
+      content += (content.endsWith('\n') || content === '' ? '' : '\n') + `${key}=${value}\n`;
     }
-    fs.writeFileSync(envPath, envContent);
-    console.log('✅ Đã tự động cập nhật CONTRACT_ADDRESS trong .env');
-  } else {
-    console.log('⚠️  File .env chưa tồn tại. Tạo từ .env.example rồi điền địa chỉ trên.');
+    fs.writeFileSync(filePath, content);
   }
+
+  // Update root .env (backend)
+  const rootEnv = path.join(__dirname, '..', '.env');
+  upsertEnv(rootEnv, 'CONTRACT_ADDRESS', address);
+  console.log('✅ Đã cập nhật CONTRACT_ADDRESS trong .env');
+
+  // Update frontend/.env (Vite)
+  const frontendEnv = path.join(__dirname, '..', 'frontend', '.env');
+  upsertEnv(frontendEnv, 'VITE_CONTRACT_ADDRESS', address);
+  if (!fs.readFileSync(frontendEnv, 'utf8').includes('VITE_RPC_URL=')) {
+    fs.appendFileSync(frontendEnv, 'VITE_RPC_URL=http://127.0.0.1:8545\n');
+  }
+  console.log('✅ Đã cập nhật VITE_CONTRACT_ADDRESS trong frontend/.env');
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });

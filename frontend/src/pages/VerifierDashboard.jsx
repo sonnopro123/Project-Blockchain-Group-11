@@ -138,7 +138,7 @@ export default function VerifierDashboard() {
                 <p className="text-xs text-[#555]">
                   {proof.studentName} — {proof.selectedCourses?.length || 0} môn được tiết lộ
                 </p>
-                <p className="text-xs font-mono text-[#444] truncate">Issuer: {proof.issuerWallet}</p>
+                <p className="text-xs font-mono text-[#444] truncate">Issuer: {short(proof.issuerWallet)}</p>
               </div>
               <Button onClick={handleVerify} disabled={verifying} className="w-full">
                 {verifying ? 'Đang xác minh...' : 'Xác minh (on-chain + ECC + Merkle)'}
