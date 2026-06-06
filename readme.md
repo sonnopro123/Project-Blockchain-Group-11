@@ -18,49 +18,105 @@ Kết hợp **ECC Signature (MetaMask)** + **Merkle Selective Disclosure** + **O
 
 ---
 
-## Workflow thống nhất (Frontend/MetaMask là canonical flow)
+## Workflow
 
-1. **Admin** → Admin Dashboard → Thêm issuer wallet vào contract (`addIssuer`)
-2. **Issuer** → Issuer Dashboard → Điền thông tin sinh viên + bảng điểm
-   - Bước 1/2: Ký `credentialHash` bằng MetaMask (EIP-191, secp256k1, không cần gas)
-   - Bước 2/2: Gọi `issueCredential(credentialHash)` on-chain (cần ETH cho gas)
-   - Download `credential.json` → giao cho sinh viên
-3. **Student** → Student Dashboard → Upload `credential.json` → Xác nhận → Chọn môn → Download `proof.json`
-4. **Verifier** → Verifier Dashboard → Upload `proof.json` → Xác minh (3 lớp: on-chain + ECC + Merkle)
-5. **Issuer** → Revoke tab → Nhập credentialHash → Gọi `revokeCredential` on-chain
-
-**Blockchain chỉ lưu:**
-- Danh sách issuer được ủy quyền (`authorizedIssuers`)
-- Mapping credential → issuer (`credentialIssuers`) — ai issue thì chỉ người đó revoke được
-- Danh sách credential bị thu hồi (`revokedCredentials`)
-
-**Privacy**: Toàn bộ transcript (bảng điểm) lưu off-chain trong `credential.json`. Chỉ Merkle Root được ghi vào credential JSON. Blockchain không lưu bất kỳ thông tin cá nhân nào.
-
-**Backend API** (port 3000) là off-chain cache layer:
-- `POST /issuer/register` — admin đăng ký issuer (backend có OWNER_PRIVATE_KEY, gọi `addIssuer` on-chain)
-- `POST /credential/issue` — cache credential JSON đã ký từ frontend (không ký server-side)
-- `POST /proof/generate` — tạo Merkle proof từ DB cache
-- `POST /proof/verify` — verify proof (Merkle + ECC signature + on-chain checks)
+| Bước | Vai trò | Hành động | Ghi chú |
+|------|---------|-----------|---------|
+| 1 | **Admin** | `addIssuer(wallet)` on-chain | MetaMask popup, cần ETH |
+| 2 | **Issuer** | Ký `credentialHash` bằng MetaMask → download `credential.json` | 1 popup, **không cần gas** |
+| 3 | **Student** | Upload credential → chọn môn → download `proof.json` | Off-chain hoàn toàn |
+| 4 | **Verifier** | Upload proof → kiểm tra 4 lớp | ECC + Merkle + on-chain |
+| 5 | **Issuer** | `revokeCredential(hash)` on-chain | MetaMask popup, cần ETH |
 
 ---
 
 ## Kiến trúc hệ thống
 
 ```
-MetaMask (Issuer ký) ──→ Frontend (React + Vite)
-                                │
-                    ┌───────────┴───────────┐
-                    ↓                       ↓
-            Backend API (Express)    Hardhat Node (Chain 31337)
-            port 3000                port 8545
-                    │                       ↑
-                    └──── blockchainService ┘
-                          (ethers.js)
-```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     CREDPROOF — SYSTEM ARCHITECTURE                         │
+└─────────────────────────────────────────────────────────────────────────────┘
 
-- **Signing**: Issuer ký bằng MetaMask wallet — private key không bao giờ rời MetaMask
-- **On-chain**: `addIssuer`, `removeIssuer`, `revokeCredential` ghi lên Hardhat localhost
-- **Off-chain**: credential JSON lưu trên máy người dùng (download file)
+  ACTORS              FRONTEND (React + Vite :5173)      BLOCKCHAIN (Hardhat :8545)
+  ──────              ─────────────────────────────      ──────────────────────────
+
+  👤 Admin ─────────▶ AdminDashboard                           CredentialRegistry.sol
+                       addIssuer() ─────────────────────────▶ ┌─────────────────────┐
+                       removeIssuer() ──────────────────────▶ │ authorizedIssuers   │
+                       listIssuers() ◀── events ─────────────  │ mapping             │
+                                                               │                     │
+  👤 Issuer ────────▶ IssuerDashboard                          │ revokedCredentials  │
+                       │                                       │ mapping             │
+                       ├─ 1. signMessage(credentialHash) ──▶ 🦊│                     │
+                       │    MetaMask EIP-191 (no gas)   ◀────  │ credentialIssuers   │
+                       │    issuerSignature                     │ mapping             │
+                       │                                       │                     │
+                       ├─ 2. POST /credential/issue ─────────▶ │ addIssuer()         │
+                       │    (cache to backend DB)              │ removeIssuer()      │
+                       │                                       │ issueCredential()   │
+                       └─ credential.json ──────────────────▶  │ revokeCredential()  │
+                                                         │     │ isAuthorizedIssuer()│
+  👤 Student ────────▶ StudentDashboard                  │     │ isRevoked()         │
+                       upload credential.json            │     └─────────────────────┘
+                       POST /proof/generate ─────────▶   │              ▲
+                       ◀── proof.json                    │              │ ethers.js
+                              │                          │              │
+  👤 Verifier ───────▶ VerifierDashboard                 │      Backend API (Express :3000)
+                       upload proof.json                 │      ┌─────────────────────────┐
+                       isRevoked(credHash) ──────────────┼────▶ │ POST /issuer/register   │
+                       isAuthorizedIssuer(wallet) ───────┼────▶ │   → addIssuer on-chain  │
+                       ◀── valid: true/false             │      │                         │
+                                                         └────▶ │ POST /credential/issue  │
+                       IssuerDashboard (Revoke)                 │   → validate EIP-191 sig│
+                       revokeCredential(hash) ──────────────────│   → cache to data.json  │
+                         MetaMask popup (cần ETH) ──────────────│                         │
+                                                                │ POST /proof/generate    │
+                                                                │   → Merkle proof        │
+                                                                │                         │
+                                                                │ POST /proof/verify      │
+                                                                │   ① Merkle valid?       │
+                                                                │   ② ECC sig valid?      │
+                                                                │   ③ Issuer authorized?  │
+                                                                │   ④ Not revoked?        │
+                                                                └─────────────────────────┘
+
+
+  OFF-CHAIN CRYPTO (client-side, không cần gas)
+  ──────────────────────────────────────────────────────────────────────────────
+
+  ECC Signature (secp256k1 / EIP-191)        Merkle Tree (keccak256, sortPairs=true)
+  ┌─────────────────────────────────┐        ┌──────────────────────────────────────┐
+  │ credentialHash =                │        │ leaf = keccak256("courseCode|grade") │
+  │   keccak256(fields joined "|")  │        │                                      │
+  │                                 │        │              [Root]                  │
+  │ issuerSignature =               │        │             /       \                │
+  │   MetaMask.signMessage(hash)    │        │        H(L0,L1)    H(L2,L2)         │
+  │                                 │        │        /      \        \             │
+  │ verify:                         │        │      L0       L1       L2            │
+  │   ethers.verifyMessage(         │        │  (CS|grade)(KT|grade)(OOP|grade)    │
+  │     hash, sig) == issuerWallet  │        │                                      │
+  └─────────────────────────────────┘        │  Proof cho L0: [L1, H(L2,L2)]       │
+                                             │  → verifier chỉ thấy môn L0, không  │
+                                             │    biết L1, L2 là gì                │
+                                             └──────────────────────────────────────┘
+
+
+  DATA FILES (off-chain, không lên blockchain)
+  ──────────────────────────────────────────────────────────────────────────────
+
+  credential.json (Issuer → Student)         proof.json (Student → Verifier)
+  ┌─────────────────────────────────┐        ┌──────────────────────────────────────┐
+  │ credentialId                    │        │ credentialHash + issuerSignature     │
+  │ credentialHash                  │        │ merkleRoot                           │
+  │ issuerSignature (ECC)           │        │ selectedCourses: [                   │
+  │ issuerWallet                    │        │   {courseCode, grade,                │
+  │ studentWallet / studentId       │        │    leafHash, merkleProof[]}          │
+  │ universityName                  │        │ ]                                    │
+  │ merkleRoot                      │        │ (toàn bộ transcript KHÔNG có mặt)   │
+  │ courses: [{code, name, grade}]  │        └──────────────────────────────────────┘
+  │   ← toàn bộ bảng điểm          │
+  └─────────────────────────────────┘
+```
 
 ---
 
