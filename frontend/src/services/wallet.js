@@ -41,5 +41,9 @@ export function walletError(err) {
     return 'Mạng đã thay đổi. Hãy làm mới trang.'
   }
   if (msg.includes('insufficient funds')) return 'Không đủ ETH để trả phí gas.'
+  // Hardhat returns data="0x" / reason="require(false)" when sender has 0 ETH
+  if ((msg.includes('data="0x"') || msg.includes("data='0x'") || msg.includes('require(false)')) && !msg.includes('user rejected')) {
+    return 'Giao dịch thất bại — ví có thể không đủ ETH để trả gas, hoặc contract revert (kiểm tra console để biết thêm).'
+  }
   return msg.length > 120 ? msg.slice(0, 120) + '...' : msg
 }

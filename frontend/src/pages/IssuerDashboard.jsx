@@ -387,6 +387,15 @@ function RevokeTab({ wallet, authorized }) {
 
     setLoading(true)
     try {
+      // Check ETH balance — any on-chain tx needs gas
+      const balance = await wallet.provider.getBalance(wallet.address)
+      if (balance === 0n) {
+        return toast.error(
+          'Ví này có 0 ETH, không thể trả gas. Nạp ETH từ Hardhat Account #0 vào ví này, ' +
+          'hoặc dùng Hardhat Account #1 (0x70997...79C8 — có sẵn 10,000 ETH trên localhost).'
+        )
+      }
+
       // Check on-chain ownership before revoking
       const registeredIssuer = await getCredentialIssuer(wallet.provider, credHash)
       const ZERO = '0x0000000000000000000000000000000000000000'
@@ -432,10 +441,16 @@ function RevokeTab({ wallet, authorized }) {
     <div className="max-w-xl space-y-4">
       <Card>
         <h2 className="text-base font-semibold text-white mb-2">Thu hồi văn bằng</h2>
-        <p className="text-xs text-[#555] mb-5 leading-relaxed">
+        <p className="text-xs text-[#555] mb-3 leading-relaxed">
           Nhập <span className="text-white">credentialHash</span> từ file credential.json đã cấp.
           Giao dịch này sẽ ghi vĩnh viễn lên blockchain.
         </p>
+        <div className="flex items-start gap-2 bg-[#1a1000] border border-[#3a2800] rounded-xl px-4 py-3 mb-4">
+          <span className="text-yellow-400 shrink-0 mt-0.5">⚠</span>
+          <p className="text-xs text-[#aaa] leading-relaxed">
+            Thu hồi yêu cầu ETH để trả gas. Dùng <span className="text-white font-mono">Hardhat Account #1</span> (có sẵn 10,000 ETH) hoặc chuyển ETH từ Account #0 vào ví này trước.
+          </p>
+        </div>
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className="text-sm font-medium text-[#888]">Credential Hash (bytes32)</label>
