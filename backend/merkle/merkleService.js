@@ -19,6 +19,14 @@ function _hashLeaf(course) {
 }
 
 /**
+ * Returns the 0x-prefixed hex leaf hash for a course. Used by verify endpoints
+ * to recompute the expected leaf and reject tampered courseCode/grade claims.
+ */
+function hashLeafHex(course) {
+  return '0x' + _hashLeaf(course).toString('hex');
+}
+
+/**
  * Build a Merkle Tree from an array of courses.
  * @param {Array<{ courseCode: string, grade: string|number }>} courses
  * @returns {{ tree: MerkleTree, leaves: Buffer[] }}
@@ -84,4 +92,4 @@ function verifyProof(proof, leaf, root) {
   return tree.verify(proof, leaf, root);
 }
 
-module.exports = { buildMerkleTree, generateRoot, generateProof, verifyProof };
+module.exports = { buildMerkleTree, generateRoot, generateProof, verifyProof, hashLeafHex };

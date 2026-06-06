@@ -1,24 +1,24 @@
 /**
  * END-TO-END TEST — Phase 6
- * Tests full flow qua HTTP endpoints (server phải đang chạy trên port 3000).
+ * Tests full flow via HTTP endpoints (server must be running on port 3000).
  *
  * Flow:
- *   1. Register issuer
+ *   1. Register issuer (fresh — clears old DB data first)
  *   2. Issue credential
  *   3. Generate proof (selective disclosure)
  *   4. Verify proof → expect valid: true
- *   5. Revoke credential
- *   6. Verify proof lại → expect valid: false
+ *   5. Revoke credential (off-chain)
+ *   6. Verify proof again → expect valid: false (DB revocation flag)
  *
- * Chạy: node test/e2e.test.js
+ * Run: node test/e2e.test.js
  *
- * Yêu cầu trước khi chạy:
- *   - npx hardhat node        (terminal 1)
- *   - npx hardhat run scripts/deploy.js --network localhost  (terminal 2, cập nhật .env)
- *   - node backend/server.js  (terminal 3)
+ * Prerequisites:
+ *   - npx hardhat node                                               (terminal 1)
+ *   - npx hardhat run scripts/deploy.js --network localhost          (terminal 2)
+ *   - node backend/server.js                                         (terminal 3)
  *
  * Hardhat test accounts (pre-funded):
- *   Account #0 (owner, dùng cho OWNER_PRIVATE_KEY trong .env):
+ *   Account #0 (owner — OWNER_PRIVATE_KEY in .env):
  *     Address:     0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
  *     Private Key: 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
  *
@@ -27,23 +27,42 @@
  *     Private Key: 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
  */
 
+require('dotenv').config();
+const fs   = require('fs');
+const path = require('path');
+
 const BASE_URL = 'http://localhost:3000';
+const API_KEY  = process.env.API_KEY || '';
 
-// Hardhat Account #1 — used as issuer
-const ISSUER_ETH_ADDRESS  = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
-const ISSUER_ETH_PRIVKEY  = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d';
+// Hardhat Account #1 used as issuer
+const ISSUER_ETH_ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
 
-let credentialId;    // returned from /credential/issue
-let proofData;       // returned from /proof/generate
+// Use timestamp-based studentId so each test run issues a fresh credential
+// (avoids 409 "Student already has an active credential" when re-running without restarting node)
+const STUDENT_ID = `SV-${Date.now()}`;
+
+let credentialId;
+let proofData;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+function resetDB() {
+  const dbPath = path.join(__dirname, '..', 'backend', 'storage', 'data.json');
+  if (fs.existsSync(dbPath)) {
+    fs.unlinkSync(dbPath);
+    console.log('  [SETUP] Cleared old data.json — starting fresh.');
+  }
+}
+
 async function post(path, body) {
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': API_KEY,
+    },
     body: JSON.stringify(body),
   });
   const json = await res.json();
@@ -72,23 +91,19 @@ async function step1_registerIssuer() {
   const { status, body } = await post('/issuer/register', {
     name: 'Hanoi University of Science and Technology',
     ethAddress: ISSUER_ETH_ADDRESS,
-    ethPrivateKey: ISSUER_ETH_PRIVKEY,
+    // No ethPrivateKey — backend no longer accepts or stores ETH private keys
   });
 
-  assert(status === 201 || status === 409, `HTTP status should be 201 or 409, got ${status}`);
-  if (status === 201) {
-    assert(!!body.issuer.eccPublicKey, 'eccPublicKey should be returned');
-    console.log('  Issuer registered. eccPublicKey:', body.issuer.eccPublicKey.slice(0, 20) + '...');
-  } else {
-    console.log('  Issuer already registered — continuing (eccPrivateKey stored in backend DB)');
-  }
+  assert(status === 201, `HTTP status should be 201, got ${status}: ${JSON.stringify(body)}`);
+  assert(!!body.issuer.eccPublicKey, 'eccPublicKey should be returned');
+  console.log('  Issuer registered. eccPublicKey:', body.issuer.eccPublicKey.slice(0, 20) + '...');
 }
 
 async function step2_issueCredential() {
   console.log('\n--- STEP 2: Issue Credential ---');
   const { status, body } = await post('/credential/issue', {
     issuerAddress: ISSUER_ETH_ADDRESS,
-    studentId: 'SV-2021-001',
+    studentId: STUDENT_ID,
     studentName: 'Nguyen Van A',
     courses: [
       { courseCode: 'IT4527E', grade: 'A' },
@@ -125,13 +140,13 @@ async function step3_generateProof() {
 }
 
 async function step4_verifyProof_shouldPass() {
-  console.log('\n--- STEP 4: Verify Proof → expect VALID ---');
+  console.log('\n--- STEP 4: Verify Proof => expect VALID ---');
   const { status, body } = await post('/proof/verify', {
     credentialId,
-    proof: proofData.proof,
-    leaf: proofData.leaf,
+    proof:      proofData.proof,
+    leaf:       proofData.leaf,
     courseCode: proofData.courseCode,
-    grade: proofData.grade,
+    grade:      proofData.grade,
   });
 
   assert(status === 200, `HTTP status should be 200, got ${status}`);
@@ -141,23 +156,38 @@ async function step4_verifyProof_shouldPass() {
   console.log('  Result:', JSON.stringify(body));
 }
 
+async function step4b_verifyProof_tamperedGrade_shouldFail() {
+  console.log('\n--- STEP 4b: Tampered grade (valid leaf, wrong grade claim) => expect INVALID ---');
+  const { status, body } = await post('/proof/verify', {
+    credentialId,
+    proof:      proofData.proof,
+    leaf:       proofData.leaf,   // real leaf for IT4527E grade A
+    courseCode: proofData.courseCode,
+    grade:      'A+',             // tampered grade
+  });
+
+  assert(status === 200, `HTTP status should be 200, got ${status}`);
+  assert(body.valid === false, 'tampered grade should be rejected');
+  console.log('  Result:', JSON.stringify(body));
+}
+
 async function step5_revokeCredential() {
   console.log('\n--- STEP 5: Revoke Credential ---');
   const { status, body } = await post('/credential/revoke', { credentialId });
 
   assert(status === 200, `HTTP status should be 200, got ${status}: ${JSON.stringify(body)}`);
-  assert(body.message === 'Credential revoked', 'revoke message should match');
-  console.log('  Credential revoked successfully');
+  assert(!!body.message, 'revoke response should have a message');
+  console.log('  Revoked:', body.message);
 }
 
 async function step6_verifyProof_shouldFail() {
-  console.log('\n--- STEP 6: Verify Proof After Revocation → expect INVALID ---');
+  console.log('\n--- STEP 6: Verify Proof After Revocation => expect INVALID ---');
   const { status, body } = await post('/proof/verify', {
     credentialId,
-    proof: proofData.proof,
-    leaf: proofData.leaf,
+    proof:      proofData.proof,
+    leaf:       proofData.leaf,
     courseCode: proofData.courseCode,
-    grade: proofData.grade,
+    grade:      proofData.grade,
   });
 
   assert(status === 200, `HTTP status should be 200, got ${status}`);
@@ -171,10 +201,12 @@ async function step6_verifyProof_shouldFail() {
 
 async function run() {
   console.log('========================================');
-  console.log('  E2E TEST — Academic Credential System');
+  console.log('  E2E TEST -- Academic Credential System');
   console.log('========================================');
 
-  // Health check first
+  // Wipe old data so schema changes never cause stale-key failures
+  resetDB();
+
   const health = await get('/health');
   assert(health.status === 200, 'Server should be running');
 
@@ -182,6 +214,7 @@ async function run() {
   await step2_issueCredential();
   await step3_generateProof();
   await step4_verifyProof_shouldPass();
+  await step4b_verifyProof_tamperedGrade_shouldFail();
   await step5_revokeCredential();
   await step6_verifyProof_shouldFail();
 

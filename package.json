@@ -5,7 +5,7 @@
   "main": "backend/server.js",
   "scripts": {
     "start": "node backend/server.js",
-    "test:contract": "npx hardhat test",
+    "test:contract": "npx hardhat test test/CredentialRegistry.test.js",
     "test:unit": "node test/eccMerkle.test.js",
     "test:e2e": "node test/e2e.test.js",
     "deploy:local": "npx hardhat run scripts/deploy.js --network localhost",

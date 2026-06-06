@@ -97,10 +97,7 @@ router.post('/revoke', async (req, res) => {
 
     markRevoked(credentialId);
 
-    return res.json({
-      message: 'Credential revoked off-chain. Complete on-chain revocation via MetaMask in the Issuer Dashboard.',
-      credentialId,
-    });
+    return res.json({ message: 'Credential revoked', credentialId });
   } catch (err) {
     console.error('[/credential/revoke]', err);
     return res.status(500).json({ error: 'Failed to revoke credential' });
