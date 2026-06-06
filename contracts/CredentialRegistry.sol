@@ -80,13 +80,16 @@ contract CredentialRegistry {
     // Revocation — onlyAuthorizedIssuer
     // -----------------------------------------------------------------------
 
-    /// @notice Authorized issuer revokes a credential by its on-chain hash.
-    ///         The credential must have been registered via issueCredential() first.
-    ///         Only the issuer who originally issued it may revoke it.
+    /// @notice Authorized issuer revokes a credential by its off-chain hash.
+    ///         If the credential was registered on-chain via issueCredential(), only
+    ///         the registering issuer may revoke it.  Otherwise any authorized issuer
+    ///         may revoke (off-chain-only issuance path).
     /// @param credentialHash  keccak256 hash of the credential.
     function revokeCredential(bytes32 credentialHash) external onlyAuthorizedIssuer {
-        require(credentialIssuers[credentialHash] != address(0), "Credential not issued");
-        require(credentialIssuers[credentialHash] == msg.sender, "Only issuing issuer can revoke");
+        address registeredIssuer = credentialIssuers[credentialHash];
+        if (registeredIssuer != address(0)) {
+            require(registeredIssuer == msg.sender, "Only issuing issuer can revoke");
+        }
         require(!revokedCredentials[credentialHash], "Already revoked");
         revokedCredentials[credentialHash] = true;
         emit CredentialRevoked(credentialHash, msg.sender);

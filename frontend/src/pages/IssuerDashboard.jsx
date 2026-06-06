@@ -10,7 +10,7 @@ import WorkflowStepper from '../components/WorkflowStepper'
 import Tooltip from '../components/Tooltip'
 import { useToast } from '../components/Toast'
 import { walletError } from '../services/wallet'
-import { isAuthorizedIssuer, issueCredential, revokeCredential, CONTRACT_ADDRESS } from '../services/contract'
+import { isAuthorizedIssuer, revokeCredential, CONTRACT_ADDRESS } from '../services/contract'
 import {
   computeCredentialId, computeCredentialHash, signCredential,
 } from '../services/credential'
@@ -170,13 +170,9 @@ function IssueTab({ wallet, authorized }) {
 
       const credentialHash = computeCredentialHash(base)
 
-      // Popup 1/2: sign off-chain (no gas needed)
-      toast.info('MetaMask: Bước 1/2 — ký văn bằng (không cần gas)...')
+      // Single popup: sign off-chain with MetaMask (ECC signature, no gas)
+      toast.info('MetaMask sẽ hiện popup để ký văn bằng...')
       const issuerSignature = await signCredential(wallet.signer, credentialHash)
-
-      // Popup 2/2: register on-chain (needs ETH for gas)
-      toast.info('MetaMask: Bước 2/2 — đăng ký on-chain...')
-      await issueCredential(wallet.signer, credentialHash)
 
       const credential = {
         schemaVersion: '1.0',
@@ -188,7 +184,7 @@ function IssueTab({ wallet, authorized }) {
 
       localStorage.setItem('credproof_last_credential', JSON.stringify(credential))
       setResult(credential)
-      toast.success('Văn bằng đã ký và đăng ký on-chain thành công!')
+      toast.success('Văn bằng đã được ký thành công!')
     } catch (e) {
       toast.error(walletError(e))
     } finally {
