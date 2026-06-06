@@ -32,91 +32,148 @@ Kết hợp **ECC Signature (MetaMask)** + **Merkle Selective Disclosure** + **O
 
 ## Kiến trúc hệ thống
 
+### Tổng quan components
+
+```mermaid
+flowchart TB
+    subgraph U["👥 Người dùng"]
+        direction LR
+        Admin["👤 Admin"]
+        Issuer["👤 Issuer"]
+        Student["👤 Student"]
+        Verifier["👤 Verifier"]
+    end
+
+    subgraph FE["🖥️ Frontend — React + Vite (localhost:5173)"]
+        direction LR
+        AdminUI["Admin Dashboard\naddIssuer · removeIssuer"]
+        IssuerUI["Issuer Dashboard\nký credential · thu hồi"]
+        StudentUI["Student Dashboard\nupload · tạo proof"]
+        VerifierUI["Verifier Dashboard\nverify proof"]
+    end
+
+    MM{{"🦊 MetaMask\nsecp256k1 / EIP-191"}}
+
+    subgraph BE["⚙️ Backend API — Express (localhost:3000)"]
+        direction TB
+        B1["POST /issuer/register"]
+        B2["POST /credential/issue"]
+        B3["POST /proof/generate"]
+        B4["POST /proof/verify"]
+    end
+
+    subgraph BC["⛓️ Smart Contract — Hardhat (localhost:8545)"]
+        SC["CredentialRegistry.sol\n─────────────────────\nauthorizedIssuers mapping\nrevokedCredentials mapping\n─────────────────────\naddIssuer · removeIssuer\nrevokeCredential\nisAuthorizedIssuer · isRevoked"]
+    end
+
+    Admin --> AdminUI
+    Issuer --> IssuerUI
+    Student --> StudentUI
+    Verifier --> VerifierUI
+
+    AdminUI -- "addIssuer / removeIssuer\n(cần ETH)" --> MM
+    IssuerUI -- "signMessage(credentialHash)\n(không cần gas)" --> MM
+    IssuerUI -- "revokeCredential\n(cần ETH)" --> MM
+    MM -- "transaction" --> BC
+
+    IssuerUI -- "cache credential" --> B2
+    StudentUI -- "tạo Merkle proof" --> B3
+    VerifierUI -- "xác minh proof" --> B4
+
+    B1 -- "addIssuer via OWNER_KEY" --> BC
+    B4 -- "isRevoked · isAuthorizedIssuer" --> BC
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     CREDPROOF — SYSTEM ARCHITECTURE                         │
-└─────────────────────────────────────────────────────────────────────────────┘
 
-  ACTORS              FRONTEND (React + Vite :5173)      BLOCKCHAIN (Hardhat :8545)
-  ──────              ─────────────────────────────      ──────────────────────────
+### Luồng dữ liệu
 
-  👤 Admin ─────────▶ AdminDashboard                           CredentialRegistry.sol
-                       addIssuer() ─────────────────────────▶ ┌─────────────────────┐
-                       removeIssuer() ──────────────────────▶ │ authorizedIssuers   │
-                       listIssuers() ◀── events ─────────────  │ mapping             │
-                                                               │                     │
-  👤 Issuer ────────▶ IssuerDashboard                          │ revokedCredentials  │
-                       │                                       │ mapping             │
-                       ├─ 1. signMessage(credentialHash) ──▶ 🦊│                     │
-                       │    MetaMask EIP-191 (no gas)   ◀────  │ credentialIssuers   │
-                       │    issuerSignature                     │ mapping             │
-                       │                                       │                     │
-                       ├─ 2. POST /credential/issue ─────────▶ │ addIssuer()         │
-                       │    (cache to backend DB)              │ removeIssuer()      │
-                       │                                       │ issueCredential()   │
-                       └─ credential.json ──────────────────▶  │ revokeCredential()  │
-                                                         │     │ isAuthorizedIssuer()│
-  👤 Student ────────▶ StudentDashboard                  │     │ isRevoked()         │
-                       upload credential.json            │     └─────────────────────┘
-                       POST /proof/generate ─────────▶   │              ▲
-                       ◀── proof.json                    │              │ ethers.js
-                              │                          │              │
-  👤 Verifier ───────▶ VerifierDashboard                 │      Backend API (Express :3000)
-                       upload proof.json                 │      ┌─────────────────────────┐
-                       isRevoked(credHash) ──────────────┼────▶ │ POST /issuer/register   │
-                       isAuthorizedIssuer(wallet) ───────┼────▶ │   → addIssuer on-chain  │
-                       ◀── valid: true/false             │      │                         │
-                                                         └────▶ │ POST /credential/issue  │
-                       IssuerDashboard (Revoke)                 │   → validate EIP-191 sig│
-                       revokeCredential(hash) ──────────────────│   → cache to data.json  │
-                         MetaMask popup (cần ETH) ──────────────│                         │
-                                                                │ POST /proof/generate    │
-                                                                │   → Merkle proof        │
-                                                                │                         │
-                                                                │ POST /proof/verify      │
-                                                                │   ① Merkle valid?       │
-                                                                │   ② ECC sig valid?      │
-                                                                │   ③ Issuer authorized?  │
-                                                                │   ④ Not revoked?        │
-                                                                └─────────────────────────┘
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Admin as 👤 Admin
+    participant Issuer as 👤 Issuer
+    participant MM as 🦊 MetaMask
+    participant FE as Frontend
+    participant BE as Backend API
+    participant BC as Smart Contract
+    participant Student as 👤 Student
+    participant Verifier as 👤 Verifier
 
+    Admin->>MM: addIssuer(issuerWallet)
+    MM->>BC: tx ✓ — issuer được ủy quyền
 
-  OFF-CHAIN CRYPTO (client-side, không cần gas)
-  ──────────────────────────────────────────────────────────────────────────────
+    Issuer->>FE: điền form (sinh viên + bảng điểm)
+    FE->>MM: signMessage(credentialHash)
+    Note right of MM: EIP-191, secp256k1<br/>không cần gas
+    MM-->>FE: issuerSignature
+    FE->>BE: POST /credential/issue (cache)
+    FE-->>Issuer: credential.json ⬇
 
-  ECC Signature (secp256k1 / EIP-191)        Merkle Tree (keccak256, sortPairs=true)
-  ┌─────────────────────────────────┐        ┌──────────────────────────────────────┐
-  │ credentialHash =                │        │ leaf = keccak256("courseCode|grade") │
-  │   keccak256(fields joined "|")  │        │                                      │
-  │                                 │        │              [Root]                  │
-  │ issuerSignature =               │        │             /       \                │
-  │   MetaMask.signMessage(hash)    │        │        H(L0,L1)    H(L2,L2)         │
-  │                                 │        │        /      \        \             │
-  │ verify:                         │        │      L0       L1       L2            │
-  │   ethers.verifyMessage(         │        │  (CS|grade)(KT|grade)(OOP|grade)    │
-  │     hash, sig) == issuerWallet  │        │                                      │
-  └─────────────────────────────────┘        │  Proof cho L0: [L1, H(L2,L2)]       │
-                                             │  → verifier chỉ thấy môn L0, không  │
-                                             │    biết L1, L2 là gì                │
-                                             └──────────────────────────────────────┘
+    Issuer-->>Student: gửi credential.json
 
+    Student->>FE: upload credential.json, chọn môn
+    FE->>BE: POST /proof/generate
+    BE-->>FE: Merkle proof
+    FE-->>Student: proof.json ⬇
 
-  DATA FILES (off-chain, không lên blockchain)
-  ──────────────────────────────────────────────────────────────────────────────
+    Student-->>Verifier: gửi proof.json
 
-  credential.json (Issuer → Student)         proof.json (Student → Verifier)
-  ┌─────────────────────────────────┐        ┌──────────────────────────────────────┐
-  │ credentialId                    │        │ credentialHash + issuerSignature     │
-  │ credentialHash                  │        │ merkleRoot                           │
-  │ issuerSignature (ECC)           │        │ selectedCourses: [                   │
-  │ issuerWallet                    │        │   {courseCode, grade,                │
-  │ studentWallet / studentId       │        │    leafHash, merkleProof[]}          │
-  │ universityName                  │        │ ]                                    │
-  │ merkleRoot                      │        │ (toàn bộ transcript KHÔNG có mặt)   │
-  │ courses: [{code, name, grade}]  │        └──────────────────────────────────────┘
-  │   ← toàn bộ bảng điểm          │
-  └─────────────────────────────────┘
+    Verifier->>BE: POST /proof/verify
+    BE->>BC: isAuthorizedIssuer(issuerWallet)?
+    BC-->>BE: true ✓
+    BE->>BC: isRevoked(credentialHash)?
+    BC-->>BE: false ✓
+    Note right of BE: + verify ECC sig<br/>+ verify Merkle proof
+    BE-->>Verifier: valid: true ✅
+
+    Issuer->>MM: revokeCredential(credentialHash)
+    MM->>BC: tx ✓ — credential bị thu hồi
+
+    Verifier->>BE: POST /proof/verify (lại)
+    BE->>BC: isRevoked(credentialHash)?
+    BC-->>BE: true ❌
+    BE-->>Verifier: valid: false ❌
 ```
+
+### Cơ chế mã hoá (off-chain, không cần gas)
+
+**ECC Signature — secp256k1 / EIP-191**
+
+```
+credentialHash  = keccak256( issuerWallet | studentWallet | studentId |
+                             universityName | merkleRoot | issuedAt | ... )
+
+issuerSignature = MetaMask.signMessage(credentialHash)   ← 1 popup, no gas
+
+verify          = ethers.verifyMessage(credentialHash, issuerSignature)
+                  → phải trả về đúng issuerWallet
+```
+
+**Merkle Tree — keccak256, sortPairs = true**
+
+```
+leaf  = keccak256("courseCode|grade")        ← mỗi môn học là 1 leaf
+
+              [ merkleRoot ]
+             /              \
+        H(L0, L1)        H(L2, L2)
+        /       \              \
+      L0        L1             L2
+  IT3010E|A  IT3030E|B     IT3100E|C
+
+Selective Disclosure: proof của L0 = [L1, H(L2,L2)]
+→ Verifier xác minh được L0 mà không biết L1, L2 là môn gì
+```
+
+### Cấu trúc file off-chain
+
+| Trường | `credential.json` | `proof.json` |
+|--------|:-----------------:|:------------:|
+| `credentialHash` + `issuerSignature` | ✅ | ✅ |
+| `merkleRoot` | ✅ | ✅ |
+| `issuerWallet`, `studentWallet` | ✅ | ✅ |
+| `courses` (toàn bộ bảng điểm) | ✅ | ❌ ẩn |
+| `selectedCourses` + `merkleProof[]` | ❌ | ✅ |
+| Lưu ở đâu | Sinh viên giữ | Gửi cho Verifier |
 
 ---
 
