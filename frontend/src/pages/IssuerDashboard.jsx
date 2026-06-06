@@ -10,7 +10,7 @@ import WorkflowStepper from '../components/WorkflowStepper'
 import Tooltip from '../components/Tooltip'
 import { useToast } from '../components/Toast'
 import { walletError } from '../services/wallet'
-import { isAuthorizedIssuer, issueCredential, revokeCredential, CONTRACT_ADDRESS } from '../services/contract'
+import { isAuthorizedIssuer, issueCredential, revokeCredential, getCredentialIssuer, CONTRACT_ADDRESS } from '../services/contract'
 import {
   computeCredentialId, computeCredentialHash, signCredential,
 } from '../services/credential'
@@ -170,13 +170,9 @@ function IssueTab({ wallet, authorized }) {
 
       const credentialHash = computeCredentialHash(base)
 
-      // popup 1: sign (off-chain, no gas)
-      toast.info('MetaMask: Bước 1/2 — ký văn bằng...')
+      // 1 popup only: sign off-chain (no gas needed)
+      toast.info('MetaMask sẽ hiện popup để ký văn bằng...')
       const issuerSignature = await signCredential(wallet.signer, credentialHash)
-
-      // popup 2: register on-chain
-      toast.info('MetaMask: Bước 2/2 — đăng ký on-chain (cần ETH để trả gas)...')
-      await issueCredential(wallet.signer, credentialHash)
 
       const credential = {
         schemaVersion: '1.0',
@@ -188,7 +184,7 @@ function IssueTab({ wallet, authorized }) {
 
       localStorage.setItem('credproof_last_credential', JSON.stringify(credential))
       setResult(credential)
-      toast.success('Văn bằng đã ký và đăng ký on-chain thành công!')
+      toast.success('Văn bằng đã được ký thành công!')
     } catch (e) {
       toast.error(walletError(e))
     } finally {
@@ -391,7 +387,24 @@ function RevokeTab({ wallet, authorized }) {
 
     setLoading(true)
     try {
-      toast.info('MetaMask sẽ hiện popup để xác nhận giao dịch thu hồi...')
+      // Check on-chain ownership before revoking
+      const registeredIssuer = await getCredentialIssuer(wallet.provider, credHash)
+      const ZERO = '0x0000000000000000000000000000000000000000'
+
+      if (registeredIssuer !== ZERO && registeredIssuer.toLowerCase() !== wallet.address.toLowerCase()) {
+        // Different issuer owns this credential on-chain
+        return toast.error(
+          `Credential này đã được đăng ký bởi issuer khác (${registeredIssuer.slice(0,10)}...). Chỉ issuer đó mới thu hồi được.`
+        )
+      }
+
+      if (registeredIssuer === ZERO) {
+        // Not registered on-chain yet — register first to claim ownership
+        toast.info('MetaMask: Bước 1/2 — đăng ký ownership on-chain (cần ETH)...')
+        await issueCredential(wallet.signer, credHash)
+      }
+
+      toast.info('MetaMask: Thu hồi on-chain (cần ETH)...')
       const receipt = await revokeCredential(wallet.signer, credHash)
       setResult({ credHash, txHash: receipt.hash })
       toast.success('Credential đã bị thu hồi on-chain!')

@@ -42,6 +42,10 @@ export async function isRevoked(provider, credentialHash) {
   return getContract(provider).isRevoked(credentialHash)
 }
 
+export async function getCredentialIssuer(provider, credentialHash) {
+  return getContract(provider).credentialIssuers(credentialHash)
+}
+
 export async function getOwner(provider) {
   return getContract(provider).owner()
 }
