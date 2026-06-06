@@ -60,9 +60,13 @@ router.post('/verify', async (req, res) => {
     if (!cred) return res.status(404).json({ error: 'Credential not found' });
 
     // 2. Check revocation: on-chain takes precedence; fall back to local DB flag
+    //    Use credentialHash for on-chain lookup (new flow), fallback to credentialId
+    const revocationHash = cred.credentialHash || credentialId;
+    const issuerAddr = cred.issuerWallet || cred.issuerAddress || '';
+
     const [onChainRevoked, issuerAuthorized] = await Promise.all([
-      blockchain.isCredentialRevoked(credentialId).catch(() => null),
-      blockchain.isIssuerAuthorized(cred.issuerAddress).catch(() => false),
+      blockchain.isCredentialRevoked(revocationHash).catch(() => null),
+      blockchain.isIssuerAuthorized(issuerAddr).catch(() => false),
     ]);
 
     const effectivelyRevoked = onChainRevoked === true || cred.revoked === true;
@@ -79,18 +83,33 @@ router.post('/verify', async (req, res) => {
       return res.json({ valid: false, reason: 'Merkle proof invalid' });
     }
 
-    // 4. Verify ECC signature using the exact payload signed at issuance
+    // 4. Verify ECC signature
+    //    New flow: MetaMask EIP-191 — use ethers.verifyMessage
+    //    Legacy fallback: elliptic {r,s} signature
     let eccSignatureValid = false;
-    const issuer = getIssuer(cred.issuerAddress);
-    if (issuer) {
-      const payload = {
-        issuerAddress: cred.issuerAddress,
-        studentId: cred.studentId,
-        studentName: cred.studentName,
-        courses: cred.courses,
-        issuedAt: cred.issuedAt,
-      };
-      eccSignatureValid = verifySignature(payload, cred.signature, issuer.publicKey);
+
+    if (cred.credentialHash && cred.issuerSignature && (cred.issuerWallet || cred.issuerAddress)) {
+      // New flow: MetaMask EIP-191
+      try {
+        const { ethers } = require('ethers');
+        const issuerAddress = cred.issuerWallet || cred.issuerAddress;
+        const recovered = ethers.verifyMessage(ethers.getBytes(cred.credentialHash), cred.issuerSignature);
+        eccSignatureValid = recovered.toLowerCase() === issuerAddress.toLowerCase();
+      } catch { /* invalid signature format */ }
+    } else if (cred.signature && (cred.issuerAddress || cred.issuerWallet)) {
+      // Legacy: elliptic {r,s}
+      const legacyIssuerAddr = cred.issuerAddress || cred.issuerWallet;
+      const issuer = getIssuer(legacyIssuerAddr);
+      if (issuer) {
+        const payload = {
+          issuerAddress: legacyIssuerAddr,
+          studentId: cred.studentId,
+          studentName: cred.studentName,
+          courses: cred.courses,
+          issuedAt: cred.issuedAt,
+        };
+        eccSignatureValid = verifySignature(payload, cred.signature, issuer.publicKey);
+      }
     }
 
     return res.json({

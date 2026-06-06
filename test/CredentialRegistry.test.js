@@ -135,11 +135,10 @@ describe('CredentialRegistry', function () {
   describe('revokeCredential', function () {
     beforeEach(async function () {
       await registry.addIssuer(issuer1.address);
+      await registry.connect(issuer1).issueCredential(CRED_HASH);
     });
 
-    // --- Off-chain issuance path (no issueCredential called) ---
-
-    it('authorized issuer can revoke an off-chain-only credential', async function () {
+    it('issuing issuer can revoke their credential', async function () {
       await registry.connect(issuer1).revokeCredential(CRED_HASH);
       expect(await registry.isRevoked(CRED_HASH)).to.be.true;
     });
@@ -160,6 +159,20 @@ describe('CredentialRegistry', function () {
         .to.be.revertedWith('Not authorized issuer');
     });
 
+    it('cannot revoke credential not issued on-chain', async function () {
+      // CRED_HASH_2 was never issued on-chain
+      await expect(registry.connect(issuer1).revokeCredential(CRED_HASH_2))
+        .to.be.revertedWith('Credential not issued');
+    });
+
+    it('different authorized issuer CANNOT revoke', async function () {
+      await registry.addIssuer(issuer2.address);
+      await registry.connect(issuer2).issueCredential(CRED_HASH_2);
+      // issuer2 cannot revoke issuer1's credential
+      await expect(registry.connect(issuer2).revokeCredential(CRED_HASH))
+        .to.be.revertedWith('Only issuing issuer can revoke');
+    });
+
     it('cannot revoke same credential twice', async function () {
       await registry.connect(issuer1).revokeCredential(CRED_HASH);
       await expect(registry.connect(issuer1).revokeCredential(CRED_HASH))
@@ -172,28 +185,15 @@ describe('CredentialRegistry', function () {
         .to.be.revertedWith('Not authorized issuer');
     });
 
-    it('different credentials can be revoked independently', async function () {
+    it('each issuer can only revoke their own credentials', async function () {
       await registry.addIssuer(issuer2.address);
+      await registry.connect(issuer2).issueCredential(CRED_HASH_2);
+      // issuer1 revokes CRED_HASH (their own)
       await registry.connect(issuer1).revokeCredential(CRED_HASH);
+      expect(await registry.isRevoked(CRED_HASH)).to.be.true;
+      // issuer2 revokes CRED_HASH_2 (their own)
       await registry.connect(issuer2).revokeCredential(CRED_HASH_2);
-      expect(await registry.isRevoked(CRED_HASH)).to.be.true;
       expect(await registry.isRevoked(CRED_HASH_2)).to.be.true;
-    });
-
-    // --- On-chain issuance path (issueCredential called first) ---
-
-    it('when registered on-chain: only the registering issuer can revoke', async function () {
-      await registry.connect(issuer1).issueCredential(CRED_HASH);
-      await registry.addIssuer(issuer2.address);
-      // issuer2 cannot revoke issuer1's registered credential
-      await expect(registry.connect(issuer2).revokeCredential(CRED_HASH))
-        .to.be.revertedWith('Only issuing issuer can revoke');
-    });
-
-    it('when registered on-chain: registering issuer can revoke their own', async function () {
-      await registry.connect(issuer1).issueCredential(CRED_HASH);
-      await registry.connect(issuer1).revokeCredential(CRED_HASH);
-      expect(await registry.isRevoked(CRED_HASH)).to.be.true;
     });
   });
 

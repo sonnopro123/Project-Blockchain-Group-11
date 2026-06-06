@@ -55,14 +55,26 @@ function getAllIssuers() {
 
 /**
  * @param {string} credentialId
- * @param {{ issuerAddress, studentId, studentName, courses, merkleRoot,
- *            signature, payloadHash, issuedAt }} data
+ * @param {Object} data
  */
 function saveCredential(credentialId, data) {
   const db = _load();
   db.credentials[credentialId] = {
-    ...data,
     credentialId,
+    credentialHash: data.credentialHash || null,
+    issuerWallet: data.issuerWallet || null,
+    issuerAddress: data.issuerWallet || data.issuerAddress || null,  // backward compat alias
+    studentWallet: data.studentWallet || null,
+    studentId: data.studentId,
+    studentName: data.studentName || '',
+    universityName: data.universityName || '',
+    courses: data.courses,
+    merkleRoot: data.merkleRoot,
+    issuerSignature: data.issuerSignature || null,  // MetaMask 65-byte hex
+    signature: data.signature || null,              // legacy field (unused in new flow)
+    issuedAt: data.issuedAt,
+    chainId: data.chainId || 0,
+    contractAddress: data.contractAddress || '',
     revoked: false,
     savedAt: new Date().toISOString(),
   };
@@ -89,7 +101,9 @@ function markRevoked(credentialId) {
 function getActiveCredentialForStudent(studentId, issuerAddress) {
   const db = _load();
   return Object.values(db.credentials).find(
-    (c) => c.studentId === studentId && c.issuerAddress === issuerAddress && !c.revoked
+    (c) => c.studentId === studentId &&
+           (c.issuerWallet === issuerAddress || c.issuerAddress === issuerAddress) &&
+           !c.revoked
   ) || null;
 }
 

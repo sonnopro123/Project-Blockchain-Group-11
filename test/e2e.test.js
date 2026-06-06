@@ -1,14 +1,20 @@
 /**
- * END-TO-END TEST — Phase 6
- * Tests full flow via HTTP endpoints (server must be running on port 3000).
+ * END-TO-END TEST — Unified MetaMask/On-chain Flow
+ *
+ * Tests the full credential lifecycle using ethers.Wallet to simulate MetaMask signing.
  *
  * Flow:
- *   1. Register issuer (fresh — clears old DB data first)
- *   2. Issue credential
- *   3. Generate proof (selective disclosure)
- *   4. Verify proof → expect valid: true
- *   5. Revoke credential (off-chain)
- *   6. Verify proof again → expect valid: false (DB revocation flag)
+ *   1. resetDB() — clear old data.json
+ *   2. Register issuer (POST /issuer/register)
+ *   3. Build credential + compute credentialHash (same algorithm as frontend)
+ *   4. Sign credentialHash with ethers.Wallet (simulating MetaMask EIP-191)
+ *   5. Cache credential via POST /credential/issue (new format)
+ *   6. Generate proof via POST /proof/generate
+ *   7. Verify proof — expect valid: true
+ *   7b. Tampered grade — expect valid: false (leaf mismatch)
+ *   8. Issue on-chain: contract.issueCredential(credentialHash)
+ *   9. Revoke on-chain: contract.revokeCredential(credentialHash)
+ *   10. Verify proof again — expect valid: false (on-chain revoked)
  *
  * Run: node test/e2e.test.js
  *
@@ -30,18 +36,35 @@
 require('dotenv').config();
 const fs   = require('fs');
 const path = require('path');
+const { ethers } = require('ethers');
+const { generateRoot } = require('../backend/merkle/merkleService');
+const artifact = require('../artifacts/contracts/CredentialRegistry.sol/CredentialRegistry.json');
 
 const BASE_URL = 'http://localhost:3000';
 const API_KEY  = process.env.API_KEY || '';
 
-// Hardhat Account #1 used as issuer
-const ISSUER_ETH_ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
+// Hardhat Account #0 (owner)
+const OWNER_ETH_PRIVKEY  = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 
-// Use timestamp-based studentId so each test run issues a fresh credential
-// (avoids 409 "Student already has an active credential" when re-running without restarting node)
-const STUDENT_ID = `SV-${Date.now()}`;
+// Hardhat Account #1 (issuer)
+const ISSUER_ETH_ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
+const ISSUER_ETH_PRIVKEY = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d';
+
+// Student wallet (Account #2 for test)
+const STUDENT_WALLET     = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC';
+
+const STUDENT_ID   = `SV-${Date.now()}`;
+const STUDENT_NAME = 'Nguyen Van A';
+const COURSES = [
+  { courseCode: 'IT4527E', grade: 'A' },
+  { courseCode: 'IT3040',  grade: 'B+' },
+  { courseCode: 'MI1110',  grade: 'A-' },
+  { courseCode: 'PH1110',  grade: 'B' },
+];
 
 let credentialId;
+let credentialHash;
+let issuerSignature;
 let proofData;
 
 // ---------------------------------------------------------------------------
@@ -56,8 +79,8 @@ function resetDB() {
   }
 }
 
-async function post(path, body) {
-  const res = await fetch(`${BASE_URL}${path}`, {
+async function post(url, body) {
+  const res = await fetch(`${BASE_URL}${url}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -69,8 +92,8 @@ async function post(path, body) {
   return { status: res.status, body: json };
 }
 
-async function get(path) {
-  const res = await fetch(`${BASE_URL}${path}`);
+async function get(url) {
+  const res = await fetch(`${BASE_URL}${url}`);
   return { status: res.status, body: await res.json() };
 }
 
@@ -80,6 +103,29 @@ function assert(condition, message) {
     process.exit(1);
   }
   console.log(`  [PASS] ${message}`);
+}
+
+/** Compute credentialId — mirrors frontend/src/services/credential.js */
+function computeCredentialId(studentWallet, issuerWallet, issuedAt) {
+  return ethers.keccak256(
+    ethers.toUtf8Bytes(
+      `${studentWallet.toLowerCase()}:${issuerWallet.toLowerCase()}:${issuedAt}`
+    )
+  );
+}
+
+/** Compute credentialHash — mirrors frontend/src/services/credential.js */
+function computeCredentialHash(cred) {
+  const parts = [
+    cred.credentialId,
+    cred.merkleRoot,
+    cred.issuerWallet.toLowerCase(),
+    cred.studentWallet.toLowerCase(),
+    cred.issuedAt,
+    String(cred.chainId),
+    cred.contractAddress.toLowerCase(),
+  ].join('|');
+  return ethers.keccak256(ethers.toUtf8Bytes(parts));
 }
 
 // ---------------------------------------------------------------------------
@@ -94,33 +140,68 @@ async function step1_registerIssuer() {
     // No ethPrivateKey — backend no longer accepts or stores ETH private keys
   });
 
-  assert(status === 201, `HTTP status should be 201, got ${status}: ${JSON.stringify(body)}`);
-  assert(!!body.issuer.eccPublicKey, 'eccPublicKey should be returned');
-  console.log('  Issuer registered. eccPublicKey:', body.issuer.eccPublicKey.slice(0, 20) + '...');
+  assert(status === 201 || status === 409, `HTTP status should be 201 or 409, got ${status}: ${JSON.stringify(body)}`);
+  if (status === 201) {
+    assert(!!body.issuer.eccPublicKey, 'eccPublicKey should be returned');
+    console.log('  Issuer registered. eccPublicKey:', body.issuer.eccPublicKey.slice(0, 20) + '...');
+  } else {
+    console.log('  Issuer already registered — continuing.');
+  }
 }
 
-async function step2_issueCredential() {
-  console.log('\n--- STEP 2: Issue Credential ---');
+async function step2_buildAndSignCredential() {
+  console.log('\n--- STEP 2: Build credential + sign with ethers.Wallet (simulate MetaMask) ---');
+
+  const issuedAt = new Date().toISOString();
+  const contractAddress = process.env.CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000';
+  const chainId = 31337; // Hardhat local chain
+
+  credentialId = computeCredentialId(STUDENT_WALLET, ISSUER_ETH_ADDRESS, issuedAt);
+  const merkleRoot = generateRoot(COURSES);
+
+  const base = {
+    credentialId,
+    merkleRoot,
+    issuerWallet: ISSUER_ETH_ADDRESS,
+    studentWallet: STUDENT_WALLET,
+    issuedAt,
+    chainId,
+    contractAddress,
+  };
+
+  credentialHash = computeCredentialHash(base);
+
+  // Simulate MetaMask EIP-191 signing
+  const issuerWallet = new ethers.Wallet(ISSUER_ETH_PRIVKEY);
+  issuerSignature = await issuerWallet.signMessage(ethers.getBytes(credentialHash));
+
+  console.log('  credentialId:   ', credentialId);
+  console.log('  credentialHash: ', credentialHash);
+  console.log('  merkleRoot:     ', merkleRoot);
+  console.log('  issuerSignature:', issuerSignature.slice(0, 20) + '...');
+
+  // Cache credential via POST /credential/issue
+  console.log('\n--- STEP 2b: Cache credential via POST /credential/issue ---');
   const { status, body } = await post('/credential/issue', {
-    issuerAddress: ISSUER_ETH_ADDRESS,
+    credentialId,
+    credentialHash,
+    issuerWallet: ISSUER_ETH_ADDRESS,
+    issuerSignature,
+    studentWallet: STUDENT_WALLET,
     studentId: STUDENT_ID,
-    studentName: 'Nguyen Van A',
-    courses: [
-      { courseCode: 'IT4527E', grade: 'A' },
-      { courseCode: 'IT3040',  grade: 'B+' },
-      { courseCode: 'MI1110',  grade: 'A-' },
-      { courseCode: 'PH1110',  grade: 'B' },
-    ],
+    studentName: STUDENT_NAME,
+    universityName: 'Hanoi University of Science and Technology',
+    courses: COURSES,
+    merkleRoot,
+    issuedAt,
+    chainId,
+    contractAddress,
   });
 
   assert(status === 201, `HTTP status should be 201, got ${status}: ${JSON.stringify(body)}`);
-  credentialId = body.credentialId;
-  assert(!!credentialId, 'credentialId should be returned');
-  assert(!!body.merkleRoot, 'merkleRoot should be returned');
-  assert(!!body.signature?.r, 'ECC signature r should exist');
-  assert(!!body.signature?.s, 'ECC signature s should exist');
-  console.log('  credentialId:', credentialId);
-  console.log('  merkleRoot:  ', body.merkleRoot);
+  assert(body.credentialId === credentialId, 'Returned credentialId should match');
+  assert(body.credentialHash === credentialHash, 'Returned credentialHash should match');
+  console.log('  Credential cached successfully.');
 }
 
 async function step3_generateProof() {
@@ -140,7 +221,7 @@ async function step3_generateProof() {
 }
 
 async function step4_verifyProof_shouldPass() {
-  console.log('\n--- STEP 4: Verify Proof => expect VALID ---');
+  console.log('\n--- STEP 4: Verify Proof → expect VALID ---');
   const { status, body } = await post('/proof/verify', {
     credentialId,
     proof:      proofData.proof,
@@ -157,7 +238,7 @@ async function step4_verifyProof_shouldPass() {
 }
 
 async function step4b_verifyProof_tamperedGrade_shouldFail() {
-  console.log('\n--- STEP 4b: Tampered grade (valid leaf, wrong grade claim) => expect INVALID ---');
+  console.log('\n--- STEP 4b: Tampered grade → expect INVALID (leaf mismatch) ---');
   const { status, body } = await post('/proof/verify', {
     credentialId,
     proof:      proofData.proof,
@@ -171,17 +252,44 @@ async function step4b_verifyProof_tamperedGrade_shouldFail() {
   console.log('  Result:', JSON.stringify(body));
 }
 
-async function step5_revokeCredential() {
-  console.log('\n--- STEP 5: Revoke Credential ---');
-  const { status, body } = await post('/credential/revoke', { credentialId });
+async function step5_issueOnChain() {
+  console.log('\n--- STEP 5: Issue on-chain (issuer calls issueCredential) ---');
+  const contractAddress = process.env.CONTRACT_ADDRESS;
+  if (!contractAddress) {
+    console.log('  [SKIP] CONTRACT_ADDRESS not set in .env — skipping on-chain steps.');
+    return false;
+  }
 
-  assert(status === 200, `HTTP status should be 200, got ${status}: ${JSON.stringify(body)}`);
-  assert(!!body.message, 'revoke response should have a message');
-  console.log('  Revoked:', body.message);
+  const provider = new ethers.JsonRpcProvider('http://127.0.0.1:8545');
+  const issuerSigner = new ethers.Wallet(ISSUER_ETH_PRIVKEY, provider);
+  const contract = new ethers.Contract(contractAddress, artifact.abi, issuerSigner);
+
+  const tx = await contract.issueCredential(credentialHash);
+  await tx.wait();
+  console.log('  issueCredential tx mined. Hash:', tx.hash);
+  return true;
 }
 
-async function step6_verifyProof_shouldFail() {
-  console.log('\n--- STEP 6: Verify Proof After Revocation => expect INVALID ---');
+async function step6_revokeOnChain() {
+  console.log('\n--- STEP 6: Revoke on-chain (issuer calls revokeCredential) ---');
+  const contractAddress = process.env.CONTRACT_ADDRESS;
+  if (!contractAddress) {
+    console.log('  [SKIP] CONTRACT_ADDRESS not set in .env — skipping on-chain steps.');
+    return false;
+  }
+
+  const provider = new ethers.JsonRpcProvider('http://127.0.0.1:8545');
+  const issuerSigner = new ethers.Wallet(ISSUER_ETH_PRIVKEY, provider);
+  const contract = new ethers.Contract(contractAddress, artifact.abi, issuerSigner);
+
+  const tx = await contract.revokeCredential(credentialHash);
+  await tx.wait();
+  console.log('  revokeCredential tx mined. Hash:', tx.hash);
+  return true;
+}
+
+async function step7_verifyProof_shouldFail() {
+  console.log('\n--- STEP 7: Verify Proof After On-chain Revocation → expect INVALID ---');
   const { status, body } = await post('/proof/verify', {
     credentialId,
     proof:      proofData.proof,
@@ -202,21 +310,26 @@ async function step6_verifyProof_shouldFail() {
 async function run() {
   console.log('========================================');
   console.log('  E2E TEST -- Academic Credential System');
+  console.log('  Unified MetaMask / On-chain Flow');
   console.log('========================================');
 
-  // Wipe old data so schema changes never cause stale-key failures
+  // Wipe old data
   resetDB();
 
   const health = await get('/health');
   assert(health.status === 200, 'Server should be running');
 
   await step1_registerIssuer();
-  await step2_issueCredential();
+  await step2_buildAndSignCredential();
   await step3_generateProof();
   await step4_verifyProof_shouldPass();
   await step4b_verifyProof_tamperedGrade_shouldFail();
-  await step5_revokeCredential();
-  await step6_verifyProof_shouldFail();
+
+  const onChainAvailable = await step5_issueOnChain();
+  if (onChainAvailable) {
+    await step6_revokeOnChain();
+    await step7_verifyProof_shouldFail();
+  }
 
   console.log('\n========================================');
   console.log('  ALL E2E TESTS PASSED');

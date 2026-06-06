@@ -7,19 +7,35 @@
 const express = require('express');
 const router = express.Router();
 const { ethers } = require('ethers');
-const { signCredential } = require('../services/eccService');
 const { generateRoot } = require('../merkle/merkleService');
-const { saveCredential, getCredential, markRevoked, getIssuer, getActiveCredentialForStudent } = require('../storage/db');
+const { saveCredential, getCredential, getActiveCredentialForStudent } = require('../storage/db');
 const blockchain = require('../blockchain/blockchainService');
 
 // POST /credential/issue
+// Receives a credential JSON already signed by MetaMask from the frontend.
+// Validates the EIP-191 signature, then caches the credential off-chain.
 router.post('/issue', async (req, res) => {
   try {
-    const { issuerAddress, studentId, studentName, courses } = req.body;
+    const {
+      credentialId,
+      credentialHash,
+      issuerWallet,
+      issuerSignature,
+      studentWallet,
+      studentId,
+      studentName,
+      universityName,
+      courses,
+      merkleRoot,
+      issuedAt,
+      chainId,
+      contractAddress,
+    } = req.body;
 
-    if (!issuerAddress || !studentId || !courses || !Array.isArray(courses) || courses.length === 0) {
+    // Required fields
+    if (!credentialId || !credentialHash || !issuerWallet || !issuerSignature || !courses || !Array.isArray(courses) || courses.length === 0) {
       return res.status(400).json({
-        error: 'issuerAddress, studentId, and a non-empty courses array are required',
+        error: 'credentialId, credentialHash, issuerWallet, issuerSignature, and a non-empty courses array are required',
       });
     }
 
@@ -27,81 +43,62 @@ router.post('/issue', async (req, res) => {
       return res.status(400).json({ error: 'Too many courses (max 100)' });
     }
 
-    if (!/^0x[0-9a-fA-F]{40}$/.test(issuerAddress)) {
-      return res.status(400).json({ error: 'Invalid issuerAddress format' });
+    if (!/^0x[0-9a-fA-F]{40}$/.test(issuerWallet)) {
+      return res.status(400).json({ error: 'Invalid issuerWallet address format' });
     }
 
-    const issuerRecord = getIssuer(issuerAddress);
-    if (!issuerRecord) {
-      return res.status(404).json({ error: 'Issuer not found. Register issuer first.' });
+    // Check for duplicate
+    if (getCredential(credentialId)) {
+      return res.status(409).json({ error: 'Credential already cached', credentialId });
     }
 
-    const eccPrivateKey = issuerRecord.eccPrivateKey;
-    if (!eccPrivateKey) {
-      return res.status(500).json({ error: 'Issuer ECC key not found in storage. Re-register issuer.' });
+    // Validate MetaMask EIP-191 signature
+    try {
+      const recovered = ethers.verifyMessage(ethers.getBytes(credentialHash), issuerSignature);
+      if (recovered.toLowerCase() !== issuerWallet.toLowerCase()) {
+        return res.status(400).json({ error: 'Signature does not match issuerWallet' });
+      }
+    } catch (sigErr) {
+      return res.status(400).json({ error: 'Invalid issuerSignature: ' + sigErr.message });
     }
 
-    const activeCredential = getActiveCredentialForStudent(studentId, issuerAddress);
-    if (activeCredential) {
-      return res.status(409).json({
-        error: 'Student already has an active credential from this issuer. Revoke the existing credential before issuing a new one.',
-        existingCredentialId: activeCredential.credentialId,
-      });
-    }
+    // Compute merkle root if not provided
+    const computedMerkleRoot = merkleRoot || generateRoot(courses);
 
-    const issuedAt = new Date().toISOString();
-    const payload = { issuerAddress, studentId, studentName, courses, issuedAt };
-
-    const { signature, hash } = signCredential(payload, eccPrivateKey);
-    const merkleRoot = generateRoot(courses);
-
-    const credentialId = ethers.keccak256(
-      ethers.toUtf8Bytes(`${studentId}:${issuerAddress}:${issuedAt}`)
-    );
-
+    // Cache credential
     saveCredential(credentialId, {
-      issuerAddress,
-      studentId,
-      studentName,
+      credentialHash,
+      issuerWallet,
+      studentWallet: studentWallet || null,
+      studentId: studentId || '',
+      studentName: studentName || '',
+      universityName: universityName || '',
       courses,
-      merkleRoot,
-      signature,
-      payloadHash: hash,
-      issuedAt,
+      merkleRoot: computedMerkleRoot,
+      issuerSignature,
+      issuedAt: issuedAt || new Date().toISOString(),
+      chainId: chainId || 0,
+      contractAddress: contractAddress || '',
     });
 
     return res.status(201).json({
+      message: 'Credential cached',
       credentialId,
-      merkleRoot,
-      signature,
-      payload,
+      credentialHash,
     });
   } catch (err) {
     console.error('[/credential/issue]', err);
-    return res.status(500).json({ error: 'Failed to issue credential' });
+    return res.status(500).json({ error: 'Failed to cache credential' });
   }
 });
 
 // POST /credential/revoke
-// Marks credential as revoked off-chain.
-// On-chain revocation must be performed by the issuer via MetaMask in the web UI
-// (contract function revokeCredential is onlyAuthorizedIssuer — only issuer's wallet can sign).
+// Revocation is now performed on-chain via the Issuer Dashboard (MetaMask).
 router.post('/revoke', async (req, res) => {
-  try {
-    const { credentialId } = req.body;
-    if (!credentialId) return res.status(400).json({ error: 'credentialId required' });
-
-    const cred = getCredential(credentialId);
-    if (!cred) return res.status(404).json({ error: 'Credential not found' });
-    if (cred.revoked) return res.status(409).json({ error: 'Already revoked' });
-
-    markRevoked(credentialId);
-
-    return res.json({ message: 'Credential revoked', credentialId });
-  } catch (err) {
-    console.error('[/credential/revoke]', err);
-    return res.status(500).json({ error: 'Failed to revoke credential' });
-  }
+  return res.status(410).json({
+    error: 'Endpoint deprecated.',
+    note: 'Revocation is performed on-chain via the Issuer Dashboard (MetaMask). This endpoint no longer marks credentials as revoked.',
+  });
 });
 
 // GET /credential/:id
@@ -110,7 +107,10 @@ router.get('/:id', async (req, res) => {
     const cred = getCredential(req.params.id);
     if (!cred) return res.status(404).json({ error: 'Credential not found' });
 
-    const onChainRevoked = await blockchain.isCredentialRevoked(req.params.id).catch(() => null);
+    // Use credentialHash for on-chain revocation check (new flow), fallback to credentialId
+    const revocationHash = cred.credentialHash || req.params.id;
+    const onChainRevoked = await blockchain.isCredentialRevoked(revocationHash).catch(() => null);
+
     return res.json({ ...cred, onChainRevoked: onChainRevoked ?? cred.revoked });
   } catch (err) {
     console.error('[/credential/:id]', err);

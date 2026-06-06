@@ -18,6 +18,32 @@ Kết hợp **ECC Signature (MetaMask)** + **Merkle Selective Disclosure** + **O
 
 ---
 
+## Workflow thống nhất (Frontend/MetaMask là canonical flow)
+
+1. **Admin** → Admin Dashboard → Thêm issuer wallet vào contract (`addIssuer`)
+2. **Issuer** → Issuer Dashboard → Điền thông tin sinh viên + bảng điểm
+   - Bước 1/2: Ký `credentialHash` bằng MetaMask (EIP-191, secp256k1, không cần gas)
+   - Bước 2/2: Gọi `issueCredential(credentialHash)` on-chain (cần ETH cho gas)
+   - Download `credential.json` → giao cho sinh viên
+3. **Student** → Student Dashboard → Upload `credential.json` → Xác nhận → Chọn môn → Download `proof.json`
+4. **Verifier** → Verifier Dashboard → Upload `proof.json` → Xác minh (3 lớp: on-chain + ECC + Merkle)
+5. **Issuer** → Revoke tab → Nhập credentialHash → Gọi `revokeCredential` on-chain
+
+**Blockchain chỉ lưu:**
+- Danh sách issuer được ủy quyền (`authorizedIssuers`)
+- Mapping credential → issuer (`credentialIssuers`) — ai issue thì chỉ người đó revoke được
+- Danh sách credential bị thu hồi (`revokedCredentials`)
+
+**Privacy**: Toàn bộ transcript (bảng điểm) lưu off-chain trong `credential.json`. Chỉ Merkle Root được ghi vào credential JSON. Blockchain không lưu bất kỳ thông tin cá nhân nào.
+
+**Backend API** (port 3000) là off-chain cache layer:
+- `POST /issuer/register` — admin đăng ký issuer (backend có OWNER_PRIVATE_KEY, gọi `addIssuer` on-chain)
+- `POST /credential/issue` — cache credential JSON đã ký từ frontend (không ký server-side)
+- `POST /proof/generate` — tạo Merkle proof từ DB cache
+- `POST /proof/verify` — verify proof (Merkle + ECC signature + on-chain checks)
+
+---
+
 ## Kiến trúc hệ thống
 
 ```
