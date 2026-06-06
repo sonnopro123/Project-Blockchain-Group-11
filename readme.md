@@ -295,17 +295,3 @@ node test/e2e.test.js
 - Nút "Chuyển mạng ngay" trong banner đỏ giúp tự động switch MetaMask sang Chain 31337
 - Issuer phải dùng **đúng ví đã được Admin ủy quyền** để phát hành — dùng sai ví sẽ bị reject
 
----
-
-## Deploy lên Sepolia (demo cuối)
-
-```bash
-# Cập nhật .env
-RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY
-OWNER_PRIVATE_KEY=0xYOUR_REAL_PRIVATE_KEY
-
-# Deploy
-npx hardhat run scripts/deploy.js --network sepolia
-```
-
-Faucet ETH test: https://sepoliafaucet.com
