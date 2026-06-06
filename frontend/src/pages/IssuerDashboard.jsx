@@ -366,6 +366,25 @@ function RevokeTab({ wallet, authorized }) {
   const handle = async () => {
     if (!credHash.trim()) return toast.error('Nhập Credential Hash')
     if (!/^0x[0-9a-fA-F]{64}$/.test(credHash)) return toast.error('Credential Hash phải là bytes32 hex (0x + 64 ký tự)')
+
+    // Ownership check: verify this wallet is the one that issued the credential.
+    // Credential JSON (in localStorage) stores issuerWallet — compare before sending tx.
+    try {
+      const saved = localStorage.getItem('credproof_last_credential')
+      if (saved) {
+        const cred = JSON.parse(saved)
+        if (cred.credentialHash?.toLowerCase() === credHash.toLowerCase()) {
+          const isOwner = cred.issuerWallet?.toLowerCase() === wallet.address.toLowerCase()
+          if (!isOwner) {
+            return toast.error(
+              `Ví hiện tại (${wallet.address.slice(0,10)}...) không phải issuer của văn bằng này. ` +
+              `Chỉ ví ${cred.issuerWallet?.slice(0,10)}... mới được thu hồi.`
+            )
+          }
+        }
+      }
+    } catch { /* localStorage unavailable — proceed, contract will enforce */ }
+
     setLoading(true)
     try {
       toast.info('MetaMask sẽ hiện popup để xác nhận giao dịch thu hồi...')
