@@ -183,7 +183,7 @@ Selective Disclosure: proof của L0 = [L1, H(L2,L2)]
 |----------|-----------|
 | Node.js | v18+ (khuyến nghị v20+) |
 | MetaMask | Extension Chrome/Firefox (bắt buộc) |
-| Git | bất kỳ |
+| Git | bất kì |
 
 ---
 
