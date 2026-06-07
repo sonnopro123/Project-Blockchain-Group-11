@@ -216,6 +216,7 @@ export function validateProofOffChain(json) {
     const proofOk = verifyProof(sc.merkleProof, sc.leafHash, json.merkleRoot)
     results.courses.push({
       courseCode: sc.courseCode,
+      courseName: sc.courseName || '',
       grade: sc.grade,
       leafMatch,
       proofValid: proofOk,

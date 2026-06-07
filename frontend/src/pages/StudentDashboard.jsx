@@ -318,7 +318,10 @@ export default function StudentDashboard() {
                     {proofResult.selectedCourses.map((sc, i) => (
                       <div key={i} className="p-3 bg-[#0f0f0f] border border-[#1a1a1a] rounded-xl">
                         <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-mono text-white">{sc.courseCode}</span>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-xs font-mono text-white shrink-0">{sc.courseCode}</span>
+                            <span className="text-xs text-[#888] truncate">{sc.courseName}</span>
+                          </div>
                           <Badge variant="purple">{sc.grade}</Badge>
                         </div>
                         <p className="text-xs text-[#555]">Proof nodes: {sc.merkleProof.length}</p>

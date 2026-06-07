@@ -191,7 +191,8 @@ export default function VerifierDashboard() {
                   <div key={i} className="flex items-center gap-3 px-3 py-2 bg-[#0f0f0f] border border-[#1a1a1a] rounded-xl">
                     <span className={`text-sm ${c.valid ? 'text-green-400' : 'text-red-400'}`}>{c.valid ? '✓' : '✗'}</span>
                     <span className="text-xs font-mono text-[#888] w-20 shrink-0">{c.courseCode}</span>
-                    <span className="text-xs text-[#555] flex-1">
+                    <span className="text-xs text-white flex-1 truncate">{c.courseName}</span>
+                    <span className="text-xs text-[#555] shrink-0">
                       {c.leafMatch ? '' : 'leaf mismatch '}{c.proofValid ? '' : 'proof invalid'}
                       {c.valid ? 'Hợp lệ' : ''}
                     </span>
