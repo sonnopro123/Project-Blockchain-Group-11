@@ -21,6 +21,7 @@ const router = express.Router();
 const { generateIssuerKeyPair } = require('../services/eccService');
 const { saveIssuer, getIssuer } = require('../storage/db');
 const blockchain = require('../blockchain/blockchainService');
+const logger = require('../services/logger');
 
 router.post('/register', async (req, res) => {
   try {
@@ -66,7 +67,7 @@ router.post('/register', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('[/issuer/register]', err);
+    logger.error('[/issuer/register] Error registering issuer', err);
     return res.status(500).json({ error: 'Failed to register issuer' });
   }
 });

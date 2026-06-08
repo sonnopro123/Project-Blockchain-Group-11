@@ -348,7 +348,11 @@ Capstone-Project-Blockchain-Group-11/
 │   │   ├── credential.js            # POST /credential/issue|revoke, GET /credential/:id
 │   │   └── proof.js                 # POST /proof/generate|verify
 │   ├── services/
-│   │   └── eccService.js            # ECC sign/verify (secp256k1)
+│   │   ├── eccService.js            # ECC sign/verify (secp256k1)
+│   │   └── logger.js                # Ghi log tập trung (Console & File)
+│   ├── logs/                        # Nhật ký hoạt động (tự động tạo)
+│   │   ├── combined.log             # Tất cả log hệ thống & HTTP requests
+│   │   └── error.log                # Chỉ ghi log lỗi kèm Stack Trace
 │   ├── merkle/
 │   │   └── merkleService.js         # Merkle tree, proof generation/verification
 │   ├── blockchain/

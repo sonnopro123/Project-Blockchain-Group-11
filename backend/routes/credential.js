@@ -10,6 +10,7 @@ const { ethers } = require('ethers');
 const { generateRoot } = require('../merkle/merkleService');
 const { saveCredential, getCredential, getActiveCredentialForStudent } = require('../storage/db');
 const blockchain = require('../blockchain/blockchainService');
+const logger = require('../services/logger');
 
 // POST /credential/issue
 // Receives a credential JSON already signed by MetaMask from the frontend.
@@ -87,7 +88,7 @@ router.post('/issue', async (req, res) => {
       credentialHash,
     });
   } catch (err) {
-    console.error('[/credential/issue]', err);
+    logger.error('[/credential/issue] Error caching credential', err);
     return res.status(500).json({ error: 'Failed to cache credential' });
   }
 });
@@ -113,7 +114,7 @@ router.get('/:id', async (req, res) => {
 
     return res.json({ ...cred, onChainRevoked: onChainRevoked ?? cred.revoked });
   } catch (err) {
-    console.error('[/credential/:id]', err);
+    logger.error('[/credential/:id] Error fetching credential', err);
     return res.status(500).json({ error: 'Failed to fetch credential' });
   }
 });
