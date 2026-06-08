@@ -9,8 +9,20 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const blockchain = require('./blockchain/blockchainService');
+const logger = require('./services/logger');
 
 const app = express();
+
+// Request logging middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    logger.info(`${req.method} ${req.originalUrl} ${res.statusCode} - ${duration}ms - IP: ${ip}`);
+  });
+  next();
+});
 
 // Security headers
 app.use(helmet());
@@ -55,6 +67,6 @@ app.use('/proof', require('./routes/proof'));
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => logger.info(`Server running on port ${PORT}`));
 
 module.exports = app;

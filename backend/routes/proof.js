@@ -9,6 +9,7 @@ const { generateProof, verifyProof, hashLeafHex } = require('../merkle/merkleSer
 const { verifySignature } = require('../services/eccService');
 const { getCredential, getIssuer } = require('../storage/db');
 const blockchain = require('../blockchain/blockchainService');
+const logger = require('../services/logger');
 
 // POST /proof/generate
 router.post('/generate', async (req, res) => {
@@ -30,7 +31,7 @@ router.post('/generate', async (req, res) => {
 
     return res.json({ credentialId, ...proofData });
   } catch (err) {
-    console.error('[/proof/generate]', err);
+    logger.error('[/proof/generate] Error generating proof', err);
     return res.status(500).json({ error: 'Failed to generate proof' });
   }
 });
@@ -120,7 +121,7 @@ router.post('/verify', async (req, res) => {
       grade,
     });
   } catch (err) {
-    console.error('[/proof/verify]', err);
+    logger.error('[/proof/verify] Error verifying proof', err);
     return res.status(500).json({ error: 'Failed to verify proof' });
   }
 });

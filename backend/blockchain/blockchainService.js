@@ -13,6 +13,7 @@
 const { ethers } = require('ethers');
 const artifact = require('../../artifacts/contracts/CredentialRegistry.sol/CredentialRegistry.json');
 const contractABI = artifact.abi;
+const logger = require('../services/logger');
 
 let provider;
 let ownerWallet;
@@ -20,22 +21,22 @@ let contract;
 
 function init(rpcUrl, ownerPrivateKey, contractAddress) {
   if (!rpcUrl) {
-    console.warn('[blockchain] RPC_URL not set — blockchain features disabled');
+    logger.warn('[blockchain] RPC_URL not set — blockchain features disabled');
     return;
   }
   if (!ownerPrivateKey) {
-    console.warn('[blockchain] OWNER_PRIVATE_KEY not set — blockchain features disabled');
+    logger.warn('[blockchain] OWNER_PRIVATE_KEY not set — blockchain features disabled');
     return;
   }
   provider = new ethers.JsonRpcProvider(rpcUrl);
   ownerWallet = new ethers.Wallet(ownerPrivateKey, provider);
 
   if (!contractAddress) {
-    console.warn('[blockchain] CONTRACT_ADDRESS is empty — deploy contract first, then restart backend');
+    logger.warn('[blockchain] CONTRACT_ADDRESS is empty — deploy contract first, then restart backend');
     return;
   }
   contract = new ethers.Contract(contractAddress, contractABI, ownerWallet);
-  console.log('[blockchain] Contract ready at', contractAddress);
+  logger.info(`[blockchain] Contract ready at ${contractAddress}`);
 }
 
 function _ensureInit() {
