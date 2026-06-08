@@ -134,9 +134,9 @@ export default function VerifierDashboard() {
           ) : (
             <div className="space-y-3">
               <div className="p-3 bg-[#0f0f0f] border border-[#1a1a1a] rounded-xl space-y-1">
-                <p className="text-sm text-white">{proof.universityName || 'Credential'}</p>
+                <p className="text-sm text-white font-mono truncate">Credential: {short(proof.credentialId)}</p>
                 <p className="text-xs text-[#555]">
-                  {proof.studentName} — {proof.selectedCourses?.length || 0} môn được tiết lộ
+                  {proof.selectedCourses?.length || 0} môn được tiết lộ
                 </p>
                 <p className="text-xs font-mono text-[#444] truncate">Issuer: {short(proof.issuerWallet)}</p>
               </div>

@@ -7,9 +7,12 @@
  *   issuedAt, chainId, contractAddress, credentialHash, issuerSignature
  *
  * Proof JSON schema (schemaVersion 1.0):
- *   credentialId, issuerWallet, universityName, studentWallet, studentName, studentId,
+ *   credentialId, issuerWallet, studentWallet,
  *   merkleRoot, credentialHash, issuerSignature, contractAddress, chainId, issuedAt,
  *   selectedCourses[{ courseCode, courseName, grade, leafHash, merkleProof[] }]
+ *
+ * Note: universityName, studentName, studentId are deliberately omitted from the
+ * proof — selective disclosure should not leak identity fields the verifier didn't ask for.
  */
 import { ethers } from 'ethers'
 import { generateRoot, generateProof, hashLeaf, verifyProof } from './merkle'
@@ -113,10 +116,7 @@ export function buildProofJSON(credential, selectedCourseCodes) {
     schemaVersion: '1.0',
     credentialId: credential.credentialId,
     issuerWallet: credential.issuerWallet,
-    universityName: credential.universityName,
     studentWallet: credential.studentWallet,
-    studentName: credential.studentName,
-    studentId: credential.studentId,
     merkleRoot: credential.merkleRoot,
     credentialHash: credential.credentialHash,
     issuerSignature: credential.issuerSignature,
